@@ -1,20 +1,357 @@
+using LocalAppManager.Core.Diagnostics;
+using LocalAppManager.Services;
+using LocalAppManager.ViewModels;
+using LocalAppManager.Views;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using Microsoft.UI.Xaml.Input;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
+using DispatcherQueuePriority = Microsoft.UI.Dispatching.DispatcherQueuePriority;
 
 namespace LocalAppManager;
 
-/// <summary>
-/// The main content page displayed inside the application window.
-/// Add your UI logic, event handlers, and data binding here.
-/// </summary>
 public sealed partial class MainPage : Page
 {
+    private MainWindow? _window;
+    private bool _programmaticScroll;
+    private bool _dialogOpen;
+    private DispatcherQueueTimer? _toastTimer;
+
     public MainPage()
     {
         InitializeComponent();
+    }
 
-        // TODO: Add your initialization logic here.
+    public MainViewModel ViewModel { get; private set; } = null!;
+
+    public void Initialize(MainViewModel vm, MainWindow window)
+    {
+        ViewModel = vm;
+        _window = window;
+        Bindings.Update();
+
+        ListColumn.Width = new GridLength(Math.Clamp(vm.Manager.Settings.ProjectListWidth, 220, 520));
+        Splitter.Resized += w => vm.Manager.UpdateSettings(s => s.ProjectListWidth = w);
+
+        vm.Log.Appended += OnLogAppended;
+        vm.Log.Rebuilt += () => Ui.Post(ScrollToEnd, DispatcherQueuePriority.Low);
+        vm.Log.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LogViewModel.AutoScroll) && vm.Log.AutoScroll) ScrollToEnd();
+        };
+
+        ProjectItemViewModel.EditRequested += p => Ui.Forget(EditProjectAsync(p, focusCommands: false), "edit project");
+        ProjectItemViewModel.AddCommandRequested += p => Ui.Forget(EditProjectAsync(p, focusCommands: true), "add command");
+        ProjectItemViewModel.RemoveRequested += p => Ui.Forget(RemoveProjectAsync(p), "remove project");
+        GroupViewModel.EditRequested += g => Ui.Forget(EditGroupAsync(g), "edit group");
+        GroupViewModel.RemoveRequested += g => vm.Manager.RemoveGroup(g.Id);
+
+        ActualThemeChanged += (_, _) =>
+        {
+            // ANSI colors are resolved per theme when a row is built; rebuild the rows.
+            vm.Log.Rebuild();
+            Bindings.Update();
+        };
+
+        AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control, () => Ui.Forget(AddProjectAsync(), "add project"));
+        AddAccelerator(VirtualKey.F, VirtualKeyModifiers.Control, () => FilterBox.Focus(FocusState.Keyboard));
+        AddAccelerator(VirtualKey.Enter, VirtualKeyModifiers.Control, () => ViewModel.SelectedProject?.ToggleCommand.Execute(null));
+        AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control, () =>
+        {
+            if (ViewModel.SelectedProject is { IsActive: true } p) p.RestartCommand.Execute(null);
+        });
+        AddAccelerator(VirtualKey.L, VirtualKeyModifiers.Control, () => ViewModel.Log.Clear());
+    }
+
+    private void AddAccelerator(VirtualKey key, VirtualKeyModifiers modifiers, Action action)
+    {
+        var acc = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
+        acc.Invoked += (_, e) =>
+        {
+            if (_dialogOpen) return;
+            e.Handled = true;
+            action();
+        };
+        KeyboardAccelerators.Add(acc);
+    }
+
+    // ------------------------------------------------------------------ projects
+
+    private void AddProject_Click(object sender, RoutedEventArgs e) => Ui.Forget(AddProjectAsync(), "add project");
+
+    private async Task AddProjectAsync()
+    {
+        if (_window is null) return;
+        var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(_window.AppWindow.Id)
+        {
+            SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            CommitButtonText = "이 폴더 추가",
+        };
+        var result = await picker.PickSingleFolderAsync();
+        if (result is null || string.IsNullOrEmpty(result.Path)) return;
+        AddFolder(result.Path);
+    }
+
+    /// <summary>Adds a folder (also used by drag-and-drop onto the window).</summary>
+    public void AddFolder(string path)
+    {
+        try
+        {
+            bool existed = ViewModel.Manager.Projects.Any(p => string.Equals(Path.GetFullPath(p.Definition.Path).TrimEnd('\\'), Path.GetFullPath(path).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+            var vm = ViewModel.AddProject(path);
+            if (vm is null) return;
+            ShowToast(existed ? $"이미 등록된 프로젝트입니다: {vm.Name}" : $"추가했습니다: {vm.Name} ({vm.Subtitle})", existed ? InfoBarSeverity.Informational : InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("add project failed", ex);
+            ShowToast("추가하지 못했습니다: " + ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    // Dropping folders from Explorer registers them.
+    private void LayoutRoot_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+        e.AcceptedOperation = DataPackageOperation.Link;
+        e.DragUIOverride.Caption = "프로젝트로 추가";
+        e.Handled = true;
+    }
+
+    private async void LayoutRoot_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+        e.Handled = true;
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            foreach (var item in items.OfType<Windows.Storage.StorageFolder>()) AddFolder(item.Path);
+            if (!items.OfType<Windows.Storage.StorageFolder>().Any()) ShowToast("폴더를 끌어다 놓으세요.", InfoBarSeverity.Informational);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("drop failed", ex);
+        }
+    }
+
+    private async Task EditProjectAsync(ProjectItemViewModel project, bool focusCommands)
+    {
+        if (_dialogOpen) return;
+        var dialog = new ProjectSettingsDialog(ViewModel.Manager, project.Runtime.Definition, focusCommands) { XamlRoot = XamlRoot };
+        _dialogOpen = true;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || dialog.Result is null) return;
+            ViewModel.Manager.UpdateProject(dialog.Result);
+            project.RefreshScripts();
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+    }
+
+    private async Task RemoveProjectAsync(ProjectItemViewModel project)
+    {
+        if (_dialogOpen) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"{project.Name}을(를) 목록에서 제거할까요?",
+            Content = new TextBlock
+            {
+                Text = (project.IsActive ? "실행 중인 프로세스는 정지합니다. " : "") + "프로젝트 폴더와 파일은 그대로 둡니다. 설정(명령, 포트, 환경 변수)만 지워집니다.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "제거",
+            CloseButtonText = "취소",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        _dialogOpen = true;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+        await ViewModel.RemoveProjectAsync(project);
+    }
+
+    private void ReassignPort_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedProject is not { } p) return;
+        int? port = ViewModel.Manager.ReassignPort(p.Id);
+        p.Refresh();
+        ShowToast(port is int n ? $"포트를 {n}(으)로 바꿨습니다." + (p.IsActive ? " 재시작하면 적용됩니다." : "") : "범위 안에 빈 포트가 없습니다.", port is null ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+    }
+
+    private void ProjectList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        // The ListView already reordered the ObservableCollection; persist that order.
+        for (int i = 0; i < ViewModel.Projects.Count; i++)
+        {
+            var id = ViewModel.Projects[i].Id;
+            if (ViewModel.Manager.Projects.ToList().FindIndex(p => p.Id == id) != i) ViewModel.Manager.MoveProject(id, i);
+        }
+    }
+
+    // ------------------------------------------------------------------ chips
+
+    private void ChipMenu_Opening(object sender, object e)
+    {
+        ChipMenu.Items.Clear();
+        var p = ViewModel.SelectedProject;
+        if (p is null) return;
+        var add = new MenuFlyoutItem { Text = "명령 추가…", Icon = new FontIcon { Glyph = "" } };
+        add.Click += (_, _) => Ui.Forget(EditProjectAsync(p, focusCommands: true), "add command");
+        ChipMenu.Items.Add(add);
+        var reload = new MenuFlyoutItem { Text = "package.json 다시 읽기", Icon = new FontIcon { Glyph = "" } };
+        reload.Click += (_, _) => p.RefreshScripts();
+        ChipMenu.Items.Add(reload);
+        if (p.HiddenScripts.Count > 0)
+        {
+            ChipMenu.Items.Add(new MenuFlyoutSeparator());
+            var sub = new MenuFlyoutSubItem { Text = $"숨긴 스크립트 ({p.HiddenScripts.Count})" };
+            foreach (var name in p.HiddenScripts)
+            {
+                var item = new MenuFlyoutItem { Text = $"다시 표시: {name}" };
+                string n = name;
+                item.Click += (_, _) => p.ShowScriptCommand.Execute(n);
+                sub.Items.Add(item);
+            }
+            ChipMenu.Items.Add(sub);
+        }
+    }
+
+    // ------------------------------------------------------------------ groups & settings
+
+    private void AddGroup_Click(object sender, RoutedEventArgs e) => Ui.Forget(EditGroupAsync(null), "add group");
+
+    private async Task EditGroupAsync(GroupViewModel? group)
+    {
+        if (_dialogOpen) return;
+        var dialog = new GroupDialog(ViewModel.Manager, group?.Id) { XamlRoot = XamlRoot };
+        _dialogOpen = true;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (group is null) ViewModel.Manager.AddGroup(dialog.GroupName, dialog.SelectedIds);
+            else ViewModel.Manager.UpdateGroup(group.Id, dialog.GroupName, dialog.SelectedIds);
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+    }
+
+    private void Settings_Click(object sender, RoutedEventArgs e) => Ui.Forget(OpenSettingsAsync(), "settings");
+
+    private async Task OpenSettingsAsync()
+    {
+        if (_dialogOpen) return;
+        var dialog = new AppSettingsDialog(ViewModel.Manager) { XamlRoot = XamlRoot };
+        _dialogOpen = true;
+        try
+        {
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary) dialog.Apply();
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+    }
+
+    private void Quit_Click(object sender, RoutedEventArgs e) => App.Current.Quit();
+
+    // ------------------------------------------------------------------ log
+
+    private void OnLogAppended()
+    {
+        if (ViewModel.Log.AutoScroll) Ui.Post(ScrollToEnd, DispatcherQueuePriority.Low);
+    }
+
+    private void ScrollToEnd()
+    {
+        if (!ViewModel.Log.AutoScroll) return;
+        LogScroller.UpdateLayout();
+        _programmaticScroll = true;
+        LogScroller.ChangeView(null, LogScroller.ScrollableHeight, null, disableAnimation: true);
+    }
+
+    private void LogScroller_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (e.IsIntermediate) return;
+        if (_programmaticScroll)
+        {
+            _programmaticScroll = false;
+            return;
+        }
+        // The user scrolled: follow the end only while they're at the bottom.
+        bool atBottom = LogScroller.VerticalOffset >= LogScroller.ScrollableHeight - 8;
+        if (ViewModel.Log.AutoScroll != atBottom) ViewModel.Log.AutoScroll = atBottom;
+    }
+
+    private void WrapToggle_Click(object sender, RoutedEventArgs e)
+    {
+        LogRepeater.ItemTemplate = (DataTemplate)Resources[ViewModel.Log.WrapLines ? "LogLineWrapTemplate" : "LogLineNoWrapTemplate"];
+    }
+
+    private void TimestampToggle_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.SetLogTimestamps(!ViewModel.Log.ShowTimestamps);
+
+    private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape)
+        {
+            ViewModel.Log.Filter = "";
+            e.Handled = true;
+        }
+    }
+
+    private void CopyLog_Click(object sender, RoutedEventArgs e)
+    {
+        var text = ViewModel.Log.VisibleText();
+        if (text.Length == 0) return;
+        var package = new DataPackage();
+        package.SetText(text);
+        Clipboard.SetContent(package);
+        ShowToast($"{ViewModel.Log.Lines.Count:N0}줄을 복사했습니다.", InfoBarSeverity.Success);
+    }
+
+    private void ClearLog_Click(object sender, RoutedEventArgs e) => ViewModel.Log.Clear();
+
+    private void StdinBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter || ViewModel.SelectedProject is not { } p) return;
+        p.Runtime.SendInput(StdinBox.Text + "\r\n");
+        p.Runtime.Log.System($"⏎ {StdinBox.Text}");
+        StdinBox.Text = "";
+        e.Handled = true;
+    }
+
+    // ------------------------------------------------------------------ toast
+
+    public void ShowToast(string message, InfoBarSeverity severity = InfoBarSeverity.Success)
+    {
+        Toast.Message = message;
+        Toast.Severity = severity;
+        Toast.IsOpen = true;
+        _toastTimer ??= CreateToastTimer();
+        _toastTimer.Stop();
+        _toastTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateToastTimer()
+    {
+        var t = DispatcherQueue.CreateTimer();
+        t.Interval = TimeSpan.FromSeconds(3.5);
+        t.IsRepeating = false;
+        t.Tick += (_, _) => Toast.IsOpen = false;
+        return t;
     }
 }
