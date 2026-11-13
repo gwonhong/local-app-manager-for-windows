@@ -175,6 +175,48 @@ public sealed unsafe class ChildProcess : IDisposable
     /// <summary>Kills the whole process tree. <see cref="Exited"/> completes shortly after.</summary>
     public void Kill() => Job.Terminate(1);
 
+    private static readonly object ConsoleGate = new();
+
+    /// <summary>
+    /// Sends Ctrl+C to every process on the child's (hidden) console, like pressing Ctrl+C in a terminal,
+    /// so dev servers can shut down cleanly. Only possible from a process without its own console
+    /// (the GUI app); console hosts such as tests return false and should just <see cref="Kill"/>.
+    /// </summary>
+    public bool TrySendCtrlC()
+    {
+        if (UsesPseudoConsole)
+        {
+            try
+            {
+                Input.Write([0x03]);
+                Input.Flush();
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }
+
+        lock (ConsoleGate)
+        {
+            if (GetConsoleWindow() != 0) return false;
+            if (!AttachConsole((uint)ProcessId)) return false;
+            try
+            {
+                // Don't let the event we're about to raise reach this process.
+                SetConsoleCtrlHandler(0, true);
+                return GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+            }
+            finally
+            {
+                FreeConsole();
+                // Restore right away: the "ignore Ctrl+C" flag is inherited by processes started later.
+                SetConsoleCtrlHandler(0, false);
+            }
+        }
+    }
+
     public void Resize(short columns, short rows)
     {
         if (_pseudoConsole != 0) ResizePseudoConsole(_pseudoConsole, new COORD { X = columns, Y = rows });

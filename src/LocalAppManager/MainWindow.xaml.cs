@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
         }
 
         RestorePlacement();
+        ApplyTheme();
         AppWindow.Closing += OnClosing;
         Activated += (_, e) =>
         {
@@ -44,6 +45,24 @@ public sealed partial class MainWindow : Window
     }
 
     public nint Hwnd => _hwnd;
+
+    /// <summary>Applies the theme setting: follow Windows (default), or force light/dark.</summary>
+    public void ApplyTheme()
+    {
+        var theme = _vm.Manager.Settings.Theme switch
+        {
+            "light" => ElementTheme.Light,
+            "dark" => ElementTheme.Dark,
+            _ => ElementTheme.Default,
+        };
+        RootGrid.RequestedTheme = theme;
+        AppWindow.TitleBar.PreferredTheme = theme switch
+        {
+            ElementTheme.Light => TitleBarTheme.Light,
+            ElementTheme.Dark => TitleBarTheme.Dark,
+            _ => TitleBarTheme.UseDefaultAppMode,
+        };
+    }
 
     public void ShowAndActivate()
     {

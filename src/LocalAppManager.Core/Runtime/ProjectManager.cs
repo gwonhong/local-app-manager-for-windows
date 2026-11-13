@@ -57,6 +57,7 @@ public sealed class ProjectManager
     public void Load()
     {
         Settings = JsonStore.Load<AppSettings>(Paths.SettingsFile);
+        ApplyRuntimeSettings();
         var doc = JsonStore.Load<ProjectsDocument>(Paths.ProjectsFile);
         lock (_gate)
         {
@@ -111,8 +112,12 @@ public sealed class ProjectManager
             (Settings.PortRangeStart, Settings.PortRangeEnd) = (Settings.PortRangeEnd, Settings.PortRangeStart);
         Settings.LogCapacity = Math.Clamp(Settings.LogCapacity, 500, 100_000);
         foreach (var p in Projects) p.Log.Resize(Settings.LogCapacity);
+        ApplyRuntimeSettings();
         SaveSettings();
     }
+
+    private void ApplyRuntimeSettings() =>
+        ProjectRuntime.GracefulStopTimeout = Settings.GracefulStop ? TimeSpan.FromSeconds(3) : TimeSpan.Zero;
 
     private static void Normalize(ProjectDefinition def)
     {

@@ -16,6 +16,8 @@ public sealed partial class AppSettingsDialog : ContentDialog
     private readonly ToggleSwitch _startAtLogin = new() { Header = "Windows에 로그인하면 자동 실행 (트레이로 시작)" };
     private readonly ToggleSwitch _notify = new() { Header = "프로젝트가 비정상 종료하면 알림" };
     private readonly ComboBox _terminal = new() { Header = "\"터미널로 열기\"에 쓸 터미널", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _theme = new() { Header = "테마", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ToggleSwitch _graceful = new() { Header = "정지할 때 먼저 Ctrl+C 보내기 (3초 안에 안 끝나면 강제 종료)" };
 
     public AppSettingsDialog(ProjectManager manager)
     {
@@ -43,6 +45,14 @@ public sealed partial class AppSettingsDialog : ContentDialog
             if (tag == s.Terminal) _terminal.SelectedItem = item;
         }
         if (_terminal.SelectedIndex < 0) _terminal.SelectedIndex = 0;
+        foreach (var (tag, label) in new[] { ("system", "Windows 설정 따르기"), ("light", "밝게"), ("dark", "어둡게") })
+        {
+            var item = new ComboBoxItem { Content = label, Tag = tag };
+            _theme.Items.Add(item);
+            if (tag == s.Theme) _theme.SelectedItem = item;
+        }
+        if (_theme.SelectedIndex < 0) _theme.SelectedIndex = 0;
+        _graceful.IsOn = s.GracefulStop;
 
         var caption = (Style)Application.Current.Resources["CaptionSecondaryStyle"];
         var panel = new StackPanel { Spacing = 12, MinWidth = 460, Padding = new Thickness(0, 0, 16, 0) };
@@ -55,7 +65,9 @@ public sealed partial class AppSettingsDialog : ContentDialog
         panel.Children.Add(range);
         panel.Children.Add(new TextBlock { Text = "새 프로젝트에는 이 범위에서 비어 있는 포트를 배정합니다. 이미 배정된 포트는 바뀌지 않습니다.", Style = caption, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(_logLines);
+        panel.Children.Add(_graceful);
         panel.Children.Add(_terminal);
+        panel.Children.Add(_theme);
         panel.Children.Add(_closeToTray);
         panel.Children.Add(_startAtLogin);
         if (StartupRegistration.IsStale)
@@ -89,7 +101,10 @@ public sealed partial class AppSettingsDialog : ContentDialog
             s.CloseToTray = _closeToTray.IsOn;
             s.NotifyOnCrash = _notify.IsOn;
             s.Terminal = (_terminal.SelectedItem as ComboBoxItem)?.Tag as string ?? "wt";
+            s.Theme = (_theme.SelectedItem as ComboBoxItem)?.Tag as string ?? "system";
+            s.GracefulStop = _graceful.IsOn;
         });
+        App.Current.Window?.ApplyTheme();
         try
         {
             if (_startAtLogin.IsOn != StartupRegistration.IsEnabled || (_startAtLogin.IsOn && StartupRegistration.IsStale))

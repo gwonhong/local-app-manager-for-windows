@@ -203,7 +203,15 @@ public sealed class ProjectRuntime
             if (State is ProjectState.Crashed or ProjectState.Exited) RaiseChanged();
             return;
         }
-        session.Kill();
+        if (GracefulStopTimeout > TimeSpan.Zero && !session.StopRequested)
+        {
+            bool clean = await session.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
+            if (!clean) Log.System($"{GracefulStopTimeout.TotalSeconds:0}초 안에 끝나지 않아 강제로 종료했습니다.");
+        }
+        else
+        {
+            session.Kill();
+        }
         await session.Completion.ConfigureAwait(false);
         // WaitForExitAsync finishes the bookkeeping; give it a moment so callers see Stopped.
         for (int i = 0; i < 50 && ReferenceEquals(_session, session); i++) await Task.Delay(10).ConfigureAwait(false);
@@ -299,6 +307,15 @@ public sealed class ProjectRuntime
 
     // ------------------------------------------------------------------ readiness / ports
 
+    /// <summary>
+    /// Stop sends Ctrl+C and waits this long before killing the job. Zero kills right away.
+    /// Only effective in a process without a console (the GUI app).
+    /// </summary>
+    public static TimeSpan GracefulStopTimeout { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long a run may stay "Starting" waiting for its port before it's treated as running anyway.</summary>
+    public static TimeSpan PortWaitLimit { get; set; } = TimeSpan.FromSeconds(20);
+
     private async Task MonitorAsync(ProcessSession session, CancellationToken ct)
     {
         try
@@ -319,11 +336,26 @@ public sealed class ProjectRuntime
 
                 if (State == ProjectState.Starting)
                 {
+                    var elapsed = DateTime.Now - started;
                     bool ready = RunPort is int p
                         ? ports.Contains(p) || await PortProbe.IsListeningAsync(p, ct).ConfigureAwait(false)
-                        : ports.Count > 0 || DateTime.Now - started > TimeSpan.FromSeconds(2);
-                    if (ready) MarkRunning(session);
-                    else if (portsChanged) RaiseChanged();
+                        : ports.Count > 0 || elapsed > TimeSpan.FromSeconds(2);
+                    if (ready)
+                    {
+                        MarkRunning(session);
+                    }
+                    else if (RunPort is int waiting && elapsed > PortWaitLimit)
+                    {
+                        // Alive but not listening: a watcher/worker, or a server that ignores the port. Don't spin forever.
+                        Log.Error(ports.Count > 0
+                            ? $"⚠ {PortWaitLimit.TotalSeconds:0}초가 지나도 포트 {waiting}이(가) 열리지 않았고, 대신 {string.Join(", ", ports)}에서 리슨 중입니다. 포트 전달 방식(설정)을 확인하세요."
+                            : $"⚠ {PortWaitLimit.TotalSeconds:0}초가 지나도 포트 {waiting}이(가) 열리지 않았습니다. 서버가 아니라면 설정에서 포트 배정을 끄세요.");
+                        MarkRunning(session);
+                    }
+                    else if (portsChanged)
+                    {
+                        RaiseChanged();
+                    }
                 }
                 else if (portsChanged)
                 {
@@ -460,8 +492,9 @@ public sealed class ProjectRuntime
 
     internal void StopCommand(string key)
     {
-        lock (_gate)
-            if (_commandRuns.TryGetValue(key, out var run)) run.Session.Kill();
+        ProcessSession? session;
+        lock (_gate) session = _commandRuns.TryGetValue(key, out var run) ? run.Session : null;
+        if (session is not null) _ = session.StopGracefullyAsync(GracefulStopTimeout);
     }
 
     public bool IsCommandRunning(string key)

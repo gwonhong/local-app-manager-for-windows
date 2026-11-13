@@ -35,8 +35,11 @@ public sealed class AppSettings
     /// <summary>Show timestamps in the log view.</summary>
     public bool ShowTimestamps { get; set; }
 
-    /// <summary>Log font size in DIPs.</summary>
-    public double LogFontSize { get; set; } = 12.5;
+    /// <summary>Stop sends Ctrl+C first and kills the tree only if it hasn't exited after 3 seconds.</summary>
+    public bool GracefulStop { get; set; } = true;
+
+    /// <summary>"system" (default, follows Windows), "light" or "dark".</summary>
+    public string Theme { get; set; } = "system";
 
     public WindowPlacement? Window { get; set; }
 

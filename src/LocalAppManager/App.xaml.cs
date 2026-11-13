@@ -128,23 +128,28 @@ public partial class App : Application
 
     public void ShowWindow() => _window?.ShowAndActivate();
 
-    /// <summary>Quits for real: stops every project, saves window placement, removes the tray icon.</summary>
-    public void Quit()
+    /// <summary>
+    /// Quits for real: stops every project (Ctrl+C, then kill after a few seconds), saves window
+    /// placement, removes the tray icon. Even if this is skipped, the job objects kill all trees.
+    /// </summary>
+    public async void Quit()
     {
         if (_exiting) return;
         _exiting = true;
         AppLog.Info("quitting");
         try
         {
-            Manager.KillAll();
             _window?.SavePlacement();
             Manager.SaveSettings();
+            _window?.AppWindow.Hide();
+            _tray?.Dispose();
+            await Task.WhenAny(Manager.StopAllAsync(), Task.Delay(TimeSpan.FromSeconds(4)));
+            Manager.KillAll();
         }
         catch (Exception e)
         {
             AppLog.Error("error while quitting", e);
         }
-        _tray?.Dispose();
         _window?.CloseForReal();
         Exit();
     }

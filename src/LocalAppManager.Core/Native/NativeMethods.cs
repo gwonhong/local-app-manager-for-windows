@@ -208,6 +208,29 @@ internal static unsafe partial class NativeMethods
     [LibraryImport("kernel32.dll")]
     public static partial void ClosePseudoConsole(nint hPC);
 
+    // ---- Console control (graceful Ctrl+C) ----
+
+    public const uint CTRL_C_EVENT = 0;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool AttachConsole(uint dwProcessId);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FreeConsole();
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetConsoleCtrlHandler(nint handler, [MarshalAs(UnmanagedType.Bool)] bool add);
+
+    [LibraryImport("kernel32.dll")]
+    public static partial nint GetConsoleWindow();
+
     // ---- Misc ----
 
     [LibraryImport("kernel32.dll")]

@@ -63,6 +63,37 @@ internal sealed class ProcessSession : IDisposable
         _process.Kill();
     }
 
+    /// <summary>
+    /// Ctrl+C first, then a hard kill if the tree hasn't exited within <paramref name="timeout"/>.
+    /// Returns true if it exited on its own.
+    /// </summary>
+    public async Task<bool> StopGracefullyAsync(TimeSpan timeout)
+    {
+        StopRequested = true;
+        if (timeout <= TimeSpan.Zero || !_process.TrySendCtrlC())
+        {
+            _process.Kill();
+            return false;
+        }
+        // Interrupted .cmd shims (npm.cmd, node_modules\.bin\vite.cmd…) make cmd ask "Terminate batch job (Y/N)?",
+        // once per shim; ReadLoop answers each prompt while a stop is in progress.
+        _answerBatchPrompts = true;
+        lock (_decoderGate) AnswerPromptIfAny(_decoder.PeekPartial());
+        if (await Task.WhenAny(Completion, Task.Delay(timeout)).ConfigureAwait(false) == Completion) return true;
+        _process.Kill();
+        return false;
+    }
+
+    private volatile bool _answerBatchPrompts;
+
+    // English and Korean wording of cmd's prompt; the "(Y/N)?" part is the same everywhere.
+    private static readonly System.Text.RegularExpressions.Regex BatchPrompt = new(@"\((Y/N|y/n)\)\?\s*$");
+
+    private void AnswerPromptIfAny(string text)
+    {
+        if (_answerBatchPrompts && BatchPrompt.IsMatch(text)) SendInput("Y\r\n");
+    }
+
     public void SendInput(string text)
     {
         try
@@ -103,6 +134,8 @@ internal sealed class ProcessSession : IDisposable
                 lock (_decoderGate)
                 {
                     _decoder.Feed(buffer.AsSpan(0, n), lines);
+                    // The prompt has no trailing newline, so it sits in the partial line.
+                    if (_answerBatchPrompts) AnswerPromptIfAny(_decoder.PeekPartial());
                     Publish(lines);
                     // A prompt without a trailing newline ("Ok to proceed? (y)") would stay invisible; flush it if nothing follows soon.
                     _partialFlush.Change(_decoder.HasPartial ? 250 : Timeout.Infinite, Timeout.Infinite);

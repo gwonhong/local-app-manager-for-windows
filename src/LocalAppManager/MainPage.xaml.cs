@@ -34,6 +34,7 @@ public sealed partial class MainPage : Page
         Bindings.Update();
 
         ListColumn.Width = new GridLength(Math.Clamp(vm.Manager.Settings.ProjectListWidth, 220, 520));
+        ApplyWrap();
         Splitter.Resized += w => vm.Manager.UpdateSettings(s => s.ProjectListWidth = w);
 
         vm.Log.Appended += OnLogAppended;
@@ -140,7 +141,7 @@ public sealed partial class MainPage : Page
     private async Task EditProjectAsync(ProjectItemViewModel project, bool focusCommands)
     {
         if (_dialogOpen) return;
-        var dialog = new ProjectSettingsDialog(ViewModel.Manager, project.Runtime.Definition, focusCommands) { XamlRoot = XamlRoot };
+        var dialog = new ProjectSettingsDialog(ViewModel.Manager, project.Runtime.Definition, focusCommands) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
         _dialogOpen = true;
         try
         {
@@ -160,6 +161,7 @@ public sealed partial class MainPage : Page
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = ActualTheme,
             Title = $"{project.Name}을(를) 목록에서 제거할까요?",
             Content = new TextBlock
             {
@@ -235,7 +237,7 @@ public sealed partial class MainPage : Page
     private async Task EditGroupAsync(GroupViewModel? group)
     {
         if (_dialogOpen) return;
-        var dialog = new GroupDialog(ViewModel.Manager, group?.Id) { XamlRoot = XamlRoot };
+        var dialog = new GroupDialog(ViewModel.Manager, group?.Id) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
         _dialogOpen = true;
         try
         {
@@ -254,7 +256,7 @@ public sealed partial class MainPage : Page
     private async Task OpenSettingsAsync()
     {
         if (_dialogOpen) return;
-        var dialog = new AppSettingsDialog(ViewModel.Manager) { XamlRoot = XamlRoot };
+        var dialog = new AppSettingsDialog(ViewModel.Manager) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
         _dialogOpen = true;
         try
         {
@@ -296,9 +298,15 @@ public sealed partial class MainPage : Page
         if (ViewModel.Log.AutoScroll != atBottom) ViewModel.Log.AutoScroll = atBottom;
     }
 
-    private void WrapToggle_Click(object sender, RoutedEventArgs e)
+    private void WrapToggle_Click(object sender, RoutedEventArgs e) => ApplyWrap();
+
+    private void ApplyWrap()
     {
-        LogRepeater.ItemTemplate = (DataTemplate)Resources[ViewModel.Log.WrapLines ? "LogLineWrapTemplate" : "LogLineNoWrapTemplate"];
+        bool wrap = ViewModel.Log.WrapLines;
+        LogRepeater.ItemTemplate = (DataTemplate)Resources[wrap ? "LogLineWrapTemplate" : "LogLineNoWrapTemplate"];
+        // Text only wraps when the viewport doesn't offer unlimited width.
+        LogScroller.HorizontalScrollMode = wrap ? ScrollMode.Disabled : ScrollMode.Auto;
+        LogScroller.HorizontalScrollBarVisibility = wrap ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
     }
 
     private void TimestampToggle_Click(object sender, RoutedEventArgs e) =>
