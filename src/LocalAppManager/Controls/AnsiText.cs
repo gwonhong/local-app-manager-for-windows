@@ -49,7 +49,8 @@ public static class AnsiText
     public static void Render(TextBlock tb, LogLineViewModel vm)
     {
         var line = vm.Line;
-        var theme = tb.ActualTheme == ElementTheme.Default ? Application.Current.RequestedTheme == ApplicationTheme.Light ? ElementTheme.Light : ElementTheme.Dark : tb.ActualTheme;
+        // Rows are rendered before they join the tree, so their own ActualTheme isn't settled yet; use the window's.
+        var theme = Converters.Theme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
         int pos = 0;
 
         if (vm.ShowTimestamp)

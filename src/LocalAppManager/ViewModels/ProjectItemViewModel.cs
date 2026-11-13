@@ -69,6 +69,9 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     /// <summary>Hidden package.json scripts (offered in the chip row's "…" menu).</summary>
     public ObservableCollection<string> HiddenScripts { get; } = [];
 
+    /// <summary>Re-evaluates theme-dependent bindings (state brushes are resolved in code).</summary>
+    public void NotifyThemeChanged() => OnPropertyChanged(nameof(State));
+
     /// <summary>Called from any thread; coalesces bursts into one UI update.</summary>
     public void QueueRefresh()
     {

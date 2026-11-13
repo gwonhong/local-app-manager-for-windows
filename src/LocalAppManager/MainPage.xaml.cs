@@ -50,11 +50,14 @@ public sealed partial class MainPage : Page
         GroupViewModel.EditRequested += g => Ui.Forget(EditGroupAsync(g), "edit group");
         GroupViewModel.RemoveRequested += g => vm.Manager.RemoveGroup(g.Id);
 
+        Converters.Theme = ActualTheme;
         ActualThemeChanged += (_, _) =>
         {
-            // ANSI colors are resolved per theme when a row is built; rebuild the rows.
+            // ANSI colors and state brushes are resolved per theme in code; refresh them.
+            Converters.Theme = ActualTheme;
             vm.Log.Rebuild();
             Bindings.Update();
+            foreach (var p in vm.Projects) p.NotifyThemeChanged();
         };
 
         AddAccelerator(VirtualKey.N, VirtualKeyModifiers.Control, () => Ui.Forget(AddProjectAsync(), "add project"));

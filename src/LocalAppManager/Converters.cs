@@ -34,6 +34,14 @@ public static class Converters
     public static string ChipGlyph(bool running, bool succeeded, bool failed) =>
         running ? "" : failed ? "" : succeeded ? "" : "";
 
-    private static Brush Resource(string key) =>
-        Application.Current.Resources.TryGetValue(key, out var v) && v is Brush b ? b : new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    /// <summary>The window's effective theme (it can differ from the app theme when the user forces light/dark).</summary>
+    public static ElementTheme Theme { get; set; } = ElementTheme.Dark;
+
+    private static Brush Resource(string key)
+    {
+        var dicts = Application.Current.Resources.ThemeDictionaries;
+        if (dicts.TryGetValue(Theme == ElementTheme.Light ? "Light" : "Dark", out var d) && d is ResourceDictionary rd && rd.TryGetValue(key, out var v) && v is Brush b)
+            return b;
+        return Application.Current.Resources.TryGetValue(key, out var any) && any is Brush ab ? ab : new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
 }
