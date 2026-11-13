@@ -175,12 +175,17 @@ public sealed unsafe class ChildProcess : IDisposable
     /// <summary>Kills the whole process tree. <see cref="Exited"/> completes shortly after.</summary>
     public void Kill() => Job.Terminate(1);
 
-    private static readonly object ConsoleGate = new();
+    /// <summary>
+    /// Sends Ctrl+C to the console of a process id. Set by the host app; null means unsupported
+    /// (callers then just kill). It must run in a separate, short-lived process: whoever attaches to the
+    /// child's console receives the event too, and in-process the default handler (ExitProcess with
+    /// 0xC000013A) can win the race even with a custom handler installed.
+    /// </summary>
+    public static Func<int, bool>? CtrlCSender { get; set; }
 
     /// <summary>
     /// Sends Ctrl+C to every process on the child's (hidden) console, like pressing Ctrl+C in a terminal,
-    /// so dev servers can shut down cleanly. Only possible from a process without its own console
-    /// (the GUI app); console hosts such as tests return false and should just <see cref="Kill"/>.
+    /// so dev servers can shut down cleanly. Returns false if that isn't possible; callers then <see cref="Kill"/>.
     /// </summary>
     public bool TrySendCtrlC()
     {
@@ -198,23 +203,29 @@ public sealed unsafe class ChildProcess : IDisposable
             }
         }
 
-        lock (ConsoleGate)
+        try
         {
-            if (GetConsoleWindow() != 0) return false;
-            if (!AttachConsole((uint)ProcessId)) return false;
-            try
-            {
-                // Don't let the event we're about to raise reach this process.
-                SetConsoleCtrlHandler(0, true);
-                return GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
-            }
-            finally
-            {
-                FreeConsole();
-                // Restore right away: the "ignore Ctrl+C" flag is inherited by processes started later.
-                SetConsoleCtrlHandler(0, false);
-            }
+            return CtrlCSender?.Invoke(ProcessId) ?? false;
         }
+        catch (Exception e)
+        {
+            Diagnostics.AppLog.Warn($"Ctrl+C to {ProcessId} failed", e);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Body of the helper process: attach to <paramref name="processId"/>'s console and raise Ctrl+C there.
+    /// Call only from a short-lived process without its own console (it receives the event too and ignores it).
+    /// Returns 0 on success.
+    /// </summary>
+    public static int SendCtrlCFromHelper(int processId)
+    {
+        FreeConsole();
+        if (!AttachConsole((uint)processId)) return 2;
+        // Ignore it ourselves; this process exits right after, so inheritance doesn't matter.
+        SetConsoleCtrlHandler(0, true);
+        return GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) ? 0 : 3;
     }
 
     public void Resize(short columns, short rows)

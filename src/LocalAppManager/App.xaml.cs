@@ -1,4 +1,5 @@
 ﻿using LocalAppManager.Core.Diagnostics;
+using LocalAppManager.Core.Processes;
 using LocalAppManager.Core.Runtime;
 using LocalAppManager.Core.Storage;
 using LocalAppManager.Services;
@@ -30,8 +31,21 @@ public partial class App : Application
         HookExceptionHandlers();
         InitializeComponent();
 
+        ChildProcess.CtrlCSender = SendCtrlCViaHelper;
         Manager = new ProjectManager(paths);
         Manager.Load();
+    }
+
+    /// <summary>Runs this exe in "--send-ctrl-c" mode so the event never reaches the app process itself.</summary>
+    private static bool SendCtrlCViaHelper(int pid)
+    {
+        using var helper = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, $"--send-ctrl-c {pid}")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+        if (helper is null || !helper.WaitForExit(3000)) return false;
+        return helper.ExitCode == 0;
     }
 
     private void HookExceptionHandlers()

@@ -62,6 +62,11 @@ public static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // Helper mode for graceful stop: raise Ctrl+C on a child's console from a throwaway process
+        // (see ChildProcess.CtrlCSender). Must come before the single-instance check.
+        if (args.Length == 2 && args[0] == "--send-ctrl-c" && int.TryParse(args[1], out int targetPid))
+            return LocalAppManager.Core.Processes.ChildProcess.SendCtrlCFromHelper(targetPid);
+
         WinRT.ComWrappersSupport.InitializeComWrappers();
         (StartInBackground, var folders) = ParseArguments(args);
         FoldersToAdd = folders;
