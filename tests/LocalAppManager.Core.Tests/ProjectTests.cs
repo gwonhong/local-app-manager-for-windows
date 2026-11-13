@@ -129,6 +129,15 @@ public class CommandBuilderTests
     }
 
     [Fact]
+    public void Inherited_no_color_is_dropped()
+    {
+        var def = new ProjectDefinition { StartCommand = "x" };
+        Assert.False(CommandBuilder.BuildStart(def, new Dictionary<string, string> { ["NO_COLOR"] = "1" }).Environment.ContainsKey("NO_COLOR"));
+        def.Environment["NO_COLOR"] = "1";
+        Assert.Equal("1", CommandBuilder.BuildStart(def, new Dictionary<string, string>()).Environment["NO_COLOR"]);
+    }
+
+    [Fact]
     public void Placeholder_overrides_mode()
     {
         var def = new ProjectDefinition { StartCommand = "python manage.py runserver {port}", Port = 4300, PortMode = PortMode.Env };

@@ -95,6 +95,17 @@ public sealed class ProjectRuntime
         }
     }
 
+    /// <summary>Every process currently in the start command's job (cmd, npm, node, …).</summary>
+    public IReadOnlyList<int> ProcessIds
+    {
+        get
+        {
+            ProcessSession? s;
+            lock (_gate) s = _session;
+            return s?.ProcessIds ?? [];
+        }
+    }
+
     public IReadOnlyList<CommandRunInfo> CommandRuns
     {
         get { lock (_gate) return _commandRuns.Values.Select(v => v.Info).ToList(); }

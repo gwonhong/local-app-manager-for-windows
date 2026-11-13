@@ -87,6 +87,8 @@ public static partial class CommandBuilder
     {
         var env = new Dictionary<string, string>(baseEnvironment, StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in DefaultEnvironment) env[k] = v;
+        // An inherited NO_COLOR fights FORCE_COLOR (Node prints a warning on every start). Only an explicit per-project NO_COLOR stays.
+        env.Remove("NO_COLOR");
         foreach (var (k, v) in project.Environment)
         {
             if (string.IsNullOrWhiteSpace(k)) continue;
