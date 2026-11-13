@@ -40,6 +40,9 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         CloseButtonText = "취소";
         DefaultButton = ContentDialogButton.Primary;
         Style = (Style)Application.Current.Resources["DefaultContentDialogStyle"];
+        // The default 548px cap is too narrow for these forms; it only takes effect when set on the dialog itself.
+        Resources["ContentDialogMaxWidth"] = 820.0;
+        Resources["ContentDialogMaxHeight"] = 1000.0;
 
         foreach (var fw in FrameworkDetector.All) _framework.Items.Add(new ComboBoxItem { Content = fw.DisplayName, Tag = fw.Id });
         _portMode.Items.Add(new ComboBoxItem { Content = "환경 변수로 전달 (Next, CRA, Express…)", Tag = PortMode.Env });
@@ -63,6 +66,9 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
     private static TextBox Mono(TextBox tb)
     {
         tb.FontFamily = (FontFamily)Application.Current.Resources["LogFontFamily"];
+        // The header would inherit the monospace font, which renders Korean poorly.
+        if (tb.Header is string header)
+            tb.Header = new TextBlock { Text = header, FontFamily = (FontFamily)Application.Current.Resources["ContentControlThemeFontFamily"] };
         return tb;
     }
 
@@ -109,7 +115,7 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         _preview.FontFamily = (FontFamily)Application.Current.Resources["LogFontFamily"];
         _preview.FontSize = 12;
 
-        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(0, 0, 16, 0), MinWidth = 560 };
+        var panel = new StackPanel { Spacing = 12, Padding = new Thickness(0, 0, 16, 0), MinWidth = 600 };
         panel.Children.Add(Row(_name, _framework, detect));
         panel.Children.Add(_path);
         panel.Children.Add(_command);

@@ -266,6 +266,12 @@ public sealed class ProjectRuntime
                 break;
         }
 
+        if (newState == ProjectState.Crashed && CommandNotFoundHint(session) is { } hint)
+        {
+            Log.Error(hint);
+            lock (_gate) LastError = hint;
+        }
+
         if (newState == ProjectState.Crashed)
         {
             // A run that stayed up for a while counts as healthy: start the backoff over.
@@ -274,6 +280,21 @@ public sealed class ProjectRuntime
             if (Definition.AutoRestart) ScheduleRestart();
         }
         RaiseChanged();
+    }
+
+    /// <summary>cmd's "'x' is not recognized…" (in English or Korean) means the tool isn't on PATH.</summary>
+    private string? CommandNotFoundHint(ProcessSession session)
+    {
+        var recent = Log.GetSince(Math.Max(0, Log.NextSeq - 40)).Where(l => l.Time >= session.StartedAt.AddSeconds(-1) && l.Source is null);
+        foreach (var line in recent)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(line.Text, @"^'(?<cmd>[^']+)'(?:은\(는\) 내부 또는 외부 명령| is not recognized as an internal or external command)");
+            if (!m.Success) continue;
+            string cmd = m.Groups["cmd"].Value;
+            string alt = cmd is "npm" or "npx" ? " pnpm/yarn을 쓰는 프로젝트라면 시작 명령을 바꾸고," : "";
+            return $"'{cmd}' 명령을 찾지 못했습니다.{alt} 설치 여부와 PATH를 확인하세요. (PATH는 실행할 때마다 레지스트리에서 다시 읽습니다)";
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ readiness / ports

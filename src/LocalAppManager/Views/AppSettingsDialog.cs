@@ -25,6 +25,9 @@ public sealed partial class AppSettingsDialog : ContentDialog
         CloseButtonText = "취소";
         DefaultButton = ContentDialogButton.Primary;
         Style = (Style)Application.Current.Resources["DefaultContentDialogStyle"];
+        // The default 548px cap is too narrow for these forms; it only takes effect when set on the dialog itself.
+        Resources["ContentDialogMaxWidth"] = 820.0;
+        Resources["ContentDialogMaxHeight"] = 1000.0;
 
         var s = manager.Settings;
         _rangeStart.Value = s.PortRangeStart;

@@ -57,8 +57,6 @@
             <FontFamily x:Key="LogFontFamily">Cascadia Mono, Consolas, Courier New</FontFamily>
             <!-- Explicit Latin font so "\" in paths isn't drawn as "₩" by the Korean UI font. -->
             <FontFamily x:Key="PathFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
-            <x:Double x:Key="ContentDialogMaxWidth">760</x:Double>
-            <x:Double x:Key="ContentDialogMaxHeight">900</x:Double>
 
             <!-- Small toolbar button with only an icon. -->
             <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
