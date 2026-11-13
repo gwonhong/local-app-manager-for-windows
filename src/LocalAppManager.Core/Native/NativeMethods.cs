@@ -6,7 +6,6 @@ namespace LocalAppManager.Core.Native;
 /// <summary>Win32 declarations used for job objects, process creation and pipes.</summary>
 internal static unsafe partial class NativeMethods
 {
-    public const uint CREATE_SUSPENDED = 0x00000004;
     public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const uint CREATE_NO_WINDOW = 0x08000000;
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
@@ -228,8 +227,6 @@ internal static unsafe partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetConsoleCtrlHandler(nint handler, [MarshalAs(UnmanagedType.Bool)] bool add);
 
-    [LibraryImport("kernel32.dll")]
-    public static partial nint GetConsoleWindow();
 
     // ---- Misc ----
 

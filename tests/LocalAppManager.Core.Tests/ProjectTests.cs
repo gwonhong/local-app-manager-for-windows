@@ -223,6 +223,33 @@ public class ProjectManagerTests
         Assert.Null(r.NextRestartAt);
     }
 
+    [Theory]
+    [InlineData(900)]
+    [InlineData(1000)]
+    [InlineData(1100)]
+    public async Task Stop_racing_an_auto_restart_wins(int stopAfterMs)
+    {
+        using var data = new TempDir();
+        using var proj = new TempDir();
+        var m = new ProjectManager(new AppPaths(data.Path));
+        m.Load();
+        var r = m.AddProject(proj.Path);
+        var def = r.Definition.Clone();
+        // Crashes after ~0.3 s every time, so restarts keep coming.
+        def.StartCommand = "ping -n 1 -w 300 10.255.255.1 >nul & exit /b 5";
+        def.AutoRestart = true;
+        m.UpdateProject(def);
+
+        await m.StartAsync(r.Id);
+        for (int i = 0; i < 100 && r.NextRestartAt is null; i++) await Task.Delay(20);
+        Assert.NotNull(r.NextRestartAt);
+        await Task.Delay(stopAfterMs); // the first restart is due after 1 s
+        await m.StopAsync(r.Id);
+        await Task.Delay(2500);
+        Assert.False(r.IsActive, $"still {r.State} after stop");
+        Assert.Null(r.NextRestartAt);
+    }
+
     [Fact]
     public void Backoff_doubles_and_caps() =>
         Assert.Equal([1, 2, 4, 8, 16, 32, 60, 60], Enumerable.Range(0, 8).Select(i => (int)ProjectRuntime.BackoffDelay(i).TotalSeconds));

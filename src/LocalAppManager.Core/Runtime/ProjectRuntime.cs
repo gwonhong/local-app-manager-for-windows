@@ -118,11 +118,17 @@ public sealed class ProjectRuntime
 
     // ------------------------------------------------------------------ start / stop
 
-    internal async Task StartAsync(bool isAutoRestart = false)
+    /// <summary>Bumped by every stop; an auto-restart scheduled before a stop must not start afterwards.</summary>
+    private int _stopGeneration;
+
+    internal Task StartAsync() => StartAsync(isAutoRestart: false, stopGeneration: -1);
+
+    private async Task StartAsync(bool isAutoRestart, int stopGeneration)
     {
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (isAutoRestart && stopGeneration != Volatile.Read(ref _stopGeneration)) return;
             if (!isAutoRestart) CancelPendingRestart(resetAttempts: true);
             if (_session is not null) return;
 
@@ -195,7 +201,11 @@ public sealed class ProjectRuntime
 
     internal async Task StopAsync()
     {
+        Interlocked.Increment(ref _stopGeneration);
         CancelPendingRestart(resetAttempts: true);
+        // Let a start that is already launching finish, so its session is the one we stop.
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        _lifecycle.Release();
         ProcessSession? session;
         lock (_gate) session = _session;
         if (session is null)
@@ -226,6 +236,7 @@ public sealed class ProjectRuntime
     /// <summary>Kills everything immediately (app shutdown). Doesn't wait.</summary>
     internal void KillAll()
     {
+        Interlocked.Increment(ref _stopGeneration);
         CancelPendingRestart(resetAttempts: true);
         lock (_gate)
         {
@@ -411,6 +422,7 @@ public sealed class ProjectRuntime
     {
         var delay = BackoffDelay(_restartAttempt);
         _restartAttempt++;
+        int generation = Volatile.Read(ref _stopGeneration);
         var cts = new CancellationTokenSource();
         lock (_gate)
         {
@@ -425,7 +437,7 @@ public sealed class ProjectRuntime
             {
                 await Task.Delay(delay, cts.Token).ConfigureAwait(false);
                 lock (_gate) NextRestartAt = null;
-                await StartAsync(isAutoRestart: true).ConfigureAwait(false);
+                await StartAsync(isAutoRestart: true, stopGeneration: generation).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
