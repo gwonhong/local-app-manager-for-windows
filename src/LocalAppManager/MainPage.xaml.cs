@@ -86,17 +86,27 @@ public sealed partial class MainPage : Page
 
     private void AddProject_Click(object sender, RoutedEventArgs e) => Ui.Forget(AddProjectAsync(), "add project");
 
+    private bool _picking;
+
     private async Task AddProjectAsync()
     {
-        if (_window is null) return;
-        var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(_window.AppWindow.Id)
+        if (_window is null || _picking || _dialogOpen) return;
+        _picking = true;
+        try
         {
-            SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
-            CommitButtonText = "이 폴더 추가",
-        };
-        var result = await picker.PickSingleFolderAsync();
-        if (result is null || string.IsNullOrEmpty(result.Path)) return;
-        AddFolder(result.Path);
+            var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(_window.AppWindow.Id)
+            {
+                SuggestedStartLocation = Microsoft.Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+                CommitButtonText = "이 폴더 추가",
+            };
+            var result = await picker.PickSingleFolderAsync();
+            if (result is null || string.IsNullOrEmpty(result.Path)) return;
+            AddFolder(result.Path);
+        }
+        finally
+        {
+            _picking = false;
+        }
     }
 
     /// <summary>Adds a folder (also used by drag-and-drop onto the window).</summary>

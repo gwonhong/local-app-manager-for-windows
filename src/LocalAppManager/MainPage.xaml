@@ -198,6 +198,7 @@
                                 <Button
                                     Grid.Column="2"
                                     Padding="6"
+                                    AutomationProperties.AutomationId="GroupToggle"
                                     AutomationProperties.Name="{x:Bind local:Converters.ToggleTooltip(AnyActive), Mode=OneWay}"
                                     Command="{x:Bind ToggleCommand}"
                                     Style="{StaticResource IconButtonStyle}"
