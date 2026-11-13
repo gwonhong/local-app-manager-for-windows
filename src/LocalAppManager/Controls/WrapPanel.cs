@@ -4,8 +4,8 @@ using Windows.Foundation;
 
 namespace LocalAppManager.Controls;
 
-/// <summary>Minimal left-to-right wrapping panel (for the script chips).</summary>
-public sealed class WrapPanel : Panel
+/// <summary>Minimal left-to-right wrapping panel (script chips, the facts row). Collapsed children take no space.</summary>
+public sealed partial class WrapPanel : Panel
 {
     public static readonly DependencyProperty SpacingProperty =
         DependencyProperty.Register(nameof(Spacing), typeof(double), typeof(WrapPanel), new PropertyMetadata(6.0, (d, _) => ((WrapPanel)d).InvalidateMeasure()));
@@ -21,8 +21,10 @@ public sealed class WrapPanel : Panel
         double x = 0, y = 0, rowHeight = 0, width = 0;
         foreach (var child in Children)
         {
+            // Measure every child, even collapsed ones, so a later Visibility change is picked up.
             child.Measure(new Size(availableSize.Width, double.PositiveInfinity));
             var s = child.DesiredSize;
+            if (child.Visibility == Visibility.Collapsed || s.Width <= 0) continue;
             if (x > 0 && x + s.Width > availableSize.Width)
             {
                 y += rowHeight + Spacing;
@@ -42,6 +44,11 @@ public sealed class WrapPanel : Panel
         foreach (var child in Children)
         {
             var s = child.DesiredSize;
+            if (child.Visibility == Visibility.Collapsed || s.Width <= 0)
+            {
+                child.Arrange(new Rect(0, 0, 0, 0));
+                continue;
+            }
             if (x > 0 && x + s.Width > finalSize.Width)
             {
                 y += rowHeight + Spacing;

@@ -103,9 +103,10 @@ public sealed partial class MainWindow : Window
         var saved = _vm.Manager.Settings.Window;
         if (saved is null)
         {
-            // First run: a comfortable size, centered on the primary work area.
+            // First run: a comfortable size (in DIPs, scaled to the monitor), centered on the primary work area.
             var area = DisplayArea.Primary.WorkArea;
-            int w = Math.Min(1280, area.Width - 80), h = Math.Min(820, area.Height - 80);
+            double scale = GetDpiForWindow(_hwnd) / 96.0;
+            int w = Math.Min((int)(1180 * scale), area.Width - 80), h = Math.Min((int)(780 * scale), area.Height - 80);
             AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h));
             return;
         }
@@ -165,4 +166,7 @@ public sealed partial class MainWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint hWnd);
 }

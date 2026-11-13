@@ -268,9 +268,9 @@
             <!-- Selected project -->
             <Grid
                 x:Name="DetailPane"
-                Padding="24,16,24,16"
-                RowSpacing="12"
-                Visibility="{x:Bind local:Converters.VisibleIf(ViewModel.SelectedProject), Mode=OneWay}">
+                Padding="24,14,24,16"
+                RowSpacing="10"
+                Visibility="{x:Bind ViewModel.HasSelection, Mode=OneWay}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -319,7 +319,7 @@
                                 Padding="0"
                                 Command="{x:Bind ViewModel.SelectedProject.OpenFolderCommand, Mode=OneWay}"
                                 ToolTipService.ToolTip="탐색기로 열기">
-                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.Path, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock FontFamily="{StaticResource PathFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.Path, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                             </HyperlinkButton>
                         </StackPanel>
                     </StackPanel>
@@ -369,7 +369,7 @@
                             AutomationProperties.AutomationId="OpenBrowserButton"
                             AutomationProperties.Name="브라우저로 열기"
                             Command="{x:Bind ViewModel.SelectedProject.OpenBrowserCommand, Mode=OneWay}"
-                            IsEnabled="{x:Bind local:Converters.HasValue(ViewModel.SelectedProject.Url), Mode=OneWay}"
+                            IsEnabled="{x:Bind ViewModel.SelectedProject.HasUrl, Mode=OneWay}"
                             Style="{StaticResource IconButtonStyle}"
                             ToolTipService.ToolTip="브라우저로 열기">
                             <FontIcon FontSize="16" Glyph="&#xE774;" />
@@ -428,22 +428,22 @@
 
                 <!-- Facts + notices -->
                 <StackPanel Grid.Row="2" Spacing="8">
-                    <StackPanel Orientation="Horizontal" Spacing="18">
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind local:Converters.VisibleIf(ViewModel.SelectedProject.PortText), Mode=OneWay}">
+                    <controls:WrapPanel Spacing="18">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasPort, Mode=OneWay}">
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="포트" />
                             <TextBlock AutomationProperties.AutomationId="ProjectPort" FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.PortText, Mode=OneWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind local:Converters.VisibleIf(ViewModel.SelectedProject.Url), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasUrl, Mode=OneWay}">
                             <TextBlock VerticalAlignment="Center" Style="{StaticResource CaptionSecondaryStyle}" Text="주소" />
                             <HyperlinkButton Padding="0" AutomationProperties.AutomationId="ProjectUrl" Command="{x:Bind ViewModel.SelectedProject.OpenBrowserCommand, Mode=OneWay}">
                                 <TextBlock FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.Url, Mode=OneWay}" />
                             </HyperlinkButton>
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind local:Converters.VisibleIf(ViewModel.SelectedProject.ListeningText), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasListening, Mode=OneWay}">
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="리슨" />
                             <TextBlock FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.ListeningText, Mode=OneWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind local:Converters.VisibleIf(ViewModel.SelectedProject.UptimeText), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasUptime, Mode=OneWay}">
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="실행 시간" />
                             <TextBlock FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.UptimeText, Mode=OneWay}" />
                         </StackPanel>
@@ -456,13 +456,13 @@
                                 Text="{x:Bind ViewModel.SelectedProject.StartCommandText, Mode=OneWay}"
                                 TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                    </StackPanel>
+                    </controls:WrapPanel>
 
                     <InfoBar
                         x:Name="ErrorBar"
                         AutomationProperties.AutomationId="ErrorBar"
                         IsClosable="False"
-                        IsOpen="{x:Bind local:Converters.HasValue(ViewModel.SelectedProject.ErrorMessage), Mode=OneWay}"
+                        IsOpen="{x:Bind ViewModel.SelectedProject.HasError, Mode=OneWay}"
                         Message="{x:Bind ViewModel.SelectedProject.ErrorMessage, Mode=OneWay}"
                         Severity="Error">
                         <InfoBar.ActionButton>
@@ -484,7 +484,7 @@
                     </InfoBar>
                     <InfoBar
                         IsClosable="False"
-                        IsOpen="{x:Bind local:Converters.HasValue(ViewModel.SelectedProject.RestartNote), Mode=OneWay}"
+                        IsOpen="{x:Bind ViewModel.SelectedProject.HasRestartNote, Mode=OneWay}"
                         Message="{x:Bind ViewModel.SelectedProject.RestartNote, Mode=OneWay}"
                         Severity="Warning">
                         <InfoBar.ActionButton>
@@ -499,10 +499,11 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" Padding="0,0,0,6">
                     <ItemsControl AutomationProperties.AutomationId="ScriptChips" ItemsSource="{x:Bind ViewModel.SelectedProject.Chips, Mode=OneWay}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <controls:WrapPanel Spacing="6" />
+                                <StackPanel Orientation="Horizontal" Spacing="6" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
@@ -532,6 +533,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    </ScrollViewer>
                     <Button Grid.Column="1" VerticalAlignment="Top" AutomationProperties.Name="명령 메뉴" Style="{StaticResource IconButtonStyle}" ToolTipService.ToolTip="명령 추가 · 숨긴 스크립트">
                         <FontIcon FontSize="14" Glyph="&#xE710;" />
                         <Button.Flyout>

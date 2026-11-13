@@ -47,6 +47,22 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     [ObservableProperty] public partial bool AutoRestart { get; private set; }
     [ObservableProperty] public partial bool HasRunningCommands { get; private set; }
 
+    // Plain bools for visibility: x:Bind doesn't call functions with a null argument,
+    // so "VisibleIf(Url)" would never collapse again once Url went back to null.
+    [ObservableProperty] public partial bool HasPort { get; private set; }
+    [ObservableProperty] public partial bool HasUrl { get; private set; }
+    [ObservableProperty] public partial bool HasListening { get; private set; }
+    [ObservableProperty] public partial bool HasUptime { get; private set; }
+    [ObservableProperty] public partial bool HasError { get; private set; }
+    [ObservableProperty] public partial bool HasRestartNote { get; private set; }
+
+    partial void OnPortTextChanged(string value) => HasPort = !string.IsNullOrEmpty(value);
+    partial void OnUrlChanged(string? value) => HasUrl = !string.IsNullOrEmpty(value);
+    partial void OnListeningTextChanged(string? value) => HasListening = !string.IsNullOrEmpty(value);
+    partial void OnUptimeTextChanged(string value) => HasUptime = !string.IsNullOrEmpty(value);
+    partial void OnErrorMessageChanged(string? value) => HasError = !string.IsNullOrEmpty(value);
+    partial void OnRestartNoteChanged(string? value) => HasRestartNote = !string.IsNullOrEmpty(value);
+
     /// <summary>package.json scripts and custom commands, as chips.</summary>
     public ObservableCollection<CommandChipViewModel> Chips { get; } = [];
 

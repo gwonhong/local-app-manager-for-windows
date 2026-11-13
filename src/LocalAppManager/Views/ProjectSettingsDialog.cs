@@ -13,7 +13,7 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
     private readonly ProjectDefinition _draft;
 
     private readonly TextBox _name = new() { Header = "이름" };
-    private readonly TextBox _path = new() { Header = "폴더", IsReadOnly = true };
+    private readonly TextBox _path = Mono(new TextBox { Header = "폴더", IsReadOnly = true });
     private readonly ComboBox _framework = new() { Header = "프레임워크", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _command = Mono(new TextBox { Header = "시작 명령", PlaceholderText = "예: pnpm run dev" });
     private readonly CheckBox _usePort = new() { Content = "이 프로젝트에 포트 배정" };

@@ -104,8 +104,11 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised when the number of running projects (or the project list) changes, for the tray.</summary>
     public event Action? TrayStateChanged;
 
+    [ObservableProperty] public partial bool HasSelection { get; private set; }
+
     partial void OnSelectedProjectChanged(ProjectItemViewModel? value)
     {
+        HasSelection = value is not null;
         Log.Attach(value?.Runtime.Log);
         value?.RefreshScripts();
         if (Manager.Settings.SelectedProjectId != value?.Id)
