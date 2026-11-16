@@ -13,6 +13,8 @@ artifacts/
 # Build logs
 [Ll]og/
 [Ll]ogs/
+# ...but not the source folder of the log code (Windows matches it case-insensitively).
+!src/LocalAppManager.Core/Logs/
 *.log
 *.binlog
 
