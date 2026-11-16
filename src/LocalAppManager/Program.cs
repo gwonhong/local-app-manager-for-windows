@@ -12,7 +12,11 @@ namespace LocalAppManager;
 /// </summary>
 public static partial class Program
 {
-    private const string InstanceKey = "LocalAppManager.Main";
+    // An instance pointed at another data folder (LOCALAPPMANAGER_DATA, used by tests) is a different app
+    // as far as single-instancing goes, so a test run doesn't get redirected into the real one.
+    private static readonly string InstanceKey = Environment.GetEnvironmentVariable("LOCALAPPMANAGER_DATA") is { Length: > 0 } data
+        ? "LocalAppManager.Main." + Path.GetFullPath(data).ToLowerInvariant().GetHashCode(StringComparison.Ordinal).ToString("x8")
+        : "LocalAppManager.Main";
 
     /// <summary>Launched by the Run key at login: start hidden in the tray.</summary>
     public static bool StartInBackground { get; private set; }

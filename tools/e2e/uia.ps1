@@ -24,5 +24,5 @@ function Get-LogLines($root) {
   $log.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) | ForEach-Object { $_.Current.Name }
 }
 # Useful AutomationIds: AddProjectButton, ProjectList, ProjectTitle, ProjectState, ProjectPort, ProjectUrl,
-# StartButton, StopButton, RestartButton, ErrorBar, ReassignPortButton, ScriptChips, LogFilter, LogSummary,
+# RunLabel, RunElapsed, StopButton, ErrorBar, ReassignPortButton, ScriptChips, LogFilter, LogSummary,
 # LogView, CopyLogButton, ClearLogButton, SettingsButton, ProjectSettingsButton, GroupToggle.

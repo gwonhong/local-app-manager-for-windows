@@ -1,4 +1,4 @@
-# LocalAppManager (임시 이름)
+# Local App Manager For Windows
 
 로컬 개발 서버(Vite, Next, Node, Python 등)를 즐겨찾기처럼 등록해 두고, 버튼으로 실행 / 정지 / 재시작하는 Windows 데스크톱 앱입니다.
 스크립트와 빌드도 버튼으로 돌립니다. 프로젝트마다 겹치지 않는 포트를 배정하고, 프로세스 트리를 확실하게 정리합니다.
@@ -26,7 +26,7 @@ WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용�
   - 검색(하이라이트 포함), 복사, 지우기, 줄바꿈, 시간 표시, 맨 아래 따라가기를 지원합니다.
   - 실행 중인 프로세스에 입력을 보낼 수 있습니다.
   - cmd의 한글 메시지(CP949)도 깨지지 않습니다.
-- **명령**: package.json 스크립트를 칩으로 보여 줍니다. 사용자 정의 명령(`이름: 명령`, `{port}` 사용 가능)도 칩이 되며, 칩을 다시 누르면 중지합니다.
+- **명령**: package.json 스크립트와 사용자 정의 명령(`이름: 명령`, `{port}` 사용 가능)을 칩으로 보여 줍니다. 칩을 누르면 실행하고, 다른 칩을 누르면 그쪽으로 바꾸고, 실행 중인 칩을 다시 누르면 재시작합니다. 프로젝트마다 한 번에 하나만 실행합니다. 실행 표시줄에 무엇이 얼마나 돌고 있는지와 정지 버튼이 있습니다. ★ 칩이 기본 명령입니다(목록의 ▶, 트레이, 그룹이 실행하는 명령).
 - **그룹**: 여러 프로젝트를 묶어 한 번에 시작/정지합니다.
 - **열기**: 브라우저, VS Code, 탐색기, 터미널(Windows Terminal, PowerShell, cmd).
 - **시스템 연동**:
@@ -44,6 +44,13 @@ WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용�
 ```powershell
 dotnet build src/LocalAppManager/LocalAppManager.csproj
 ./src/LocalAppManager/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/LocalAppManager.exe
+```
+
+빌드가 꼬였을 때(XAML 로드 오류 등)는 앱을 종료한 뒤 `bin`과 `obj`를 지우고 다시 빌드합니다.
+
+```powershell
+Get-ChildItem src, tests, tools -Recurse -Directory -Include bin, obj | Remove-Item -Recurse -Force
+dotnet build src/LocalAppManager/LocalAppManager.csproj
 ```
 
 배포용 빌드는 .NET과 Windows App SDK를 모두 포함하는 self-contained 빌드입니다. 설치할 필요 없이 폴더째 복사해서 실행합니다.

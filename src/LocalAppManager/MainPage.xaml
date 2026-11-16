@@ -115,10 +115,10 @@
                             </Grid.ColumnDefinitions>
                             <Grid.ContextFlyout>
                                 <MenuFlyout>
-                                    <MenuFlyoutItem Command="{x:Bind ToggleCommand}" Text="{x:Bind local:Converters.ToggleTooltip(IsActive), Mode=OneWay}">
-                                        <MenuFlyoutItem.Icon><FontIcon Glyph="{x:Bind local:Converters.ToggleGlyph(IsActive), Mode=OneWay}" /></MenuFlyoutItem.Icon>
+                                    <MenuFlyoutItem Command="{x:Bind ToggleCommand}" Text="{x:Bind local:Converters.ToggleTooltip(CanStop), Mode=OneWay}">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="{x:Bind local:Converters.ToggleGlyph(CanStop), Mode=OneWay}" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
-                                    <MenuFlyoutItem Command="{x:Bind RestartCommand}" IsEnabled="{x:Bind IsActive, Mode=OneWay}" Text="재시작">
+                                    <MenuFlyoutItem Command="{x:Bind RestartCommand}" IsEnabled="{x:Bind IsRunningAny, Mode=OneWay}" Text="재시작">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
                                     <MenuFlyoutSeparator />
@@ -145,7 +145,7 @@
                             </Grid.ContextFlyout>
 
                             <Grid Width="12" Height="12" VerticalAlignment="Center">
-                                <Ellipse Fill="{x:Bind local:Converters.StateBrush(State), Mode=OneWay}" />
+                                <Ellipse Fill="{x:Bind local:Converters.StateBrush(DisplayState), Mode=OneWay}" />
                             </Grid>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock MaxLines="1" Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
@@ -154,12 +154,12 @@
                             <Button
                                 Grid.Column="2"
                                 Padding="6"
-                                AutomationProperties.Name="{x:Bind local:Converters.ToggleTooltip(IsActive), Mode=OneWay}"
+                                AutomationProperties.Name="{x:Bind local:Converters.ToggleTooltip(CanStop), Mode=OneWay}"
                                 Command="{x:Bind ToggleCommand}"
                                 Style="{StaticResource IconButtonStyle}"
-                                ToolTipService.ToolTip="{x:Bind local:Converters.ToggleTooltip(IsActive), Mode=OneWay}">
+                                ToolTipService.ToolTip="{x:Bind local:Converters.ToggleTooltip(CanStop), Mode=OneWay}">
                                 <Grid>
-                                    <FontIcon FontSize="12" Glyph="{x:Bind local:Converters.ToggleGlyph(IsActive), Mode=OneWay}" />
+                                    <FontIcon FontSize="12" Glyph="{x:Bind local:Converters.ToggleGlyph(CanStop), Mode=OneWay}" />
                                 </Grid>
                             </Button>
                         </Grid>
@@ -280,39 +280,19 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- Header -->
+                <!-- Header: what it is, and where to open it -->
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="2">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <TextBlock
-                                x:Name="ProjectTitle"
-                                AutomationProperties.AutomationId="ProjectTitle"
-                                MaxWidth="520"
-                                Style="{StaticResource SubtitleTextBlockStyle}"
-                                Text="{x:Bind ViewModel.SelectedProject.Name, Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis" />
-                            <Border
-                                Padding="8,2,10,3"
-                                VerticalAlignment="Center"
-                                BorderBrush="{x:Bind local:Converters.StateBrush(ViewModel.SelectedProject.State), Mode=OneWay}"
-                                BorderThickness="1"
-                                CornerRadius="10">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Grid Width="10" Height="10" VerticalAlignment="Center">
-                                        <Ellipse Fill="{x:Bind local:Converters.StateBrush(ViewModel.SelectedProject.State), Mode=OneWay}" Visibility="{x:Bind local:Converters.Collapsed(ViewModel.SelectedProject.IsStarting), Mode=OneWay}" />
-                                        <ProgressRing Width="10" Height="10" MinWidth="10" MinHeight="10" IsActive="{x:Bind ViewModel.SelectedProject.IsStarting, Mode=OneWay}" />
-                                    </Grid>
-                                    <TextBlock
-                                        AutomationProperties.AutomationId="ProjectState"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind ViewModel.SelectedProject.StateText, Mode=OneWay}" />
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
+                        <TextBlock
+                            x:Name="ProjectTitle"
+                            AutomationProperties.AutomationId="ProjectTitle"
+                            Style="{StaticResource SubtitleTextBlockStyle}"
+                            Text="{x:Bind ViewModel.SelectedProject.Name, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="{x:Bind ViewModel.SelectedProject.FrameworkName, Mode=OneWay}" />
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="·" />
@@ -324,48 +304,7 @@
                             </HyperlinkButton>
                         </StackPanel>
                     </StackPanel>
-                </Grid>
-
-                <!-- Actions -->
-                <Grid Grid.Row="1" ColumnSpacing="6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button
-                            AutomationProperties.AutomationId="StartButton"
-                            Command="{x:Bind ViewModel.SelectedProject.StartCommand, Mode=OneWay}"
-                            Style="{StaticResource AccentButtonStyle}"
-                            ToolTipService.ToolTip="시작 (Ctrl+Enter)"
-                            Visibility="{x:Bind local:Converters.Collapsed(ViewModel.SelectedProject.IsActive), Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE768;" />
-                                <TextBlock Text="시작" />
-                            </StackPanel>
-                        </Button>
-                        <Button
-                            AutomationProperties.AutomationId="StopButton"
-                            Command="{x:Bind ViewModel.SelectedProject.StopCommand, Mode=OneWay}"
-                            ToolTipService.ToolTip="정지 (Ctrl+Enter)"
-                            Visibility="{x:Bind ViewModel.SelectedProject.IsActive, Mode=OneWay}">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE71A;" />
-                                <TextBlock Text="정지" />
-                            </StackPanel>
-                        </Button>
-                        <Button
-                            AutomationProperties.AutomationId="RestartButton"
-                            Command="{x:Bind ViewModel.SelectedProject.RestartCommand, Mode=OneWay}"
-                            IsEnabled="{x:Bind ViewModel.SelectedProject.IsActive, Mode=OneWay}"
-                            ToolTipService.ToolTip="재시작 (Ctrl+R)">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon FontSize="14" Glyph="&#xE72C;" />
-                                <TextBlock Text="재시작" />
-                            </StackPanel>
-                        </Button>
-                        <AppBarSeparator Padding="2,0" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Top" Orientation="Horizontal" Spacing="2">
                         <Button
                             AutomationProperties.AutomationId="OpenBrowserButton"
                             AutomationProperties.Name="브라우저로 열기"
@@ -396,8 +335,7 @@
                             ToolTipService.ToolTip="터미널로 열기">
                             <FontIcon FontSize="16" Glyph="&#xE756;" />
                         </Button>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                        <AppBarSeparator Padding="2,0" />
                         <Button
                             AutomationProperties.AutomationId="ProjectSettingsButton"
                             AutomationProperties.Name="프로젝트 설정"
@@ -427,9 +365,49 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- Facts + notices -->
-                <StackPanel Grid.Row="2" Spacing="8">
-                    <controls:WrapPanel Spacing="18">
+                <!-- Run bar: what is running (left), how long, where; Stop on the right. One run at a time. -->
+                <Grid
+                    Grid.Row="2"
+                    MinHeight="46"
+                    Padding="14,6,7,6"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    ColumnSpacing="16"
+                    CornerRadius="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">
+                        <Grid Width="14" Height="14" VerticalAlignment="Center">
+                            <Ellipse Width="10" Height="10" Fill="{x:Bind local:Converters.StateBrush(ViewModel.SelectedProject.DisplayState), Mode=OneWay}" Visibility="{x:Bind local:Converters.Collapsed(ViewModel.SelectedProject.IsStarting), Mode=OneWay}" />
+                            <ProgressRing Width="14" Height="14" MinWidth="14" MinHeight="14" IsActive="{x:Bind ViewModel.SelectedProject.IsStarting, Mode=OneWay}" />
+                        </Grid>
+                        <TextBlock
+                            MaxWidth="280"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="RunLabel"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind ViewModel.SelectedProject.RunLabel, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.SelectedProject.RunCommandLine, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.SelectedProject.HasRunLabel, Mode=OneWay}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="ProjectState"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.SelectedProject.RunStateText, Mode=OneWay}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="RunElapsed"
+                            FontFamily="{StaticResource LogFontFamily}"
+                            FontSize="12.5"
+                            Text="{x:Bind ViewModel.SelectedProject.RunElapsed, Mode=OneWay}"
+                            ToolTipService.ToolTip="실행 시간" />
+                    </StackPanel>
+                    <controls:WrapPanel Grid.Column="1" VerticalAlignment="Center" Spacing="16">
                         <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasPort, Mode=OneWay}">
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="포트" />
                             <TextBlock AutomationProperties.AutomationId="ProjectPort" FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.PortText, Mode=OneWay}" />
@@ -444,28 +422,39 @@
                             <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="리슨" />
                             <TextBlock FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.ListeningText, Mode=OneWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasUptime, Mode=OneWay}">
-                            <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="실행 시간" />
-                            <TextBlock FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.UptimeText, Mode=OneWay}" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="명령" />
-                            <TextBlock
-                                MaxWidth="420"
-                                FontFamily="{StaticResource LogFontFamily}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="{x:Bind ViewModel.SelectedProject.StartCommandText, Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
                     </controls:WrapPanel>
+                    <TextBlock
+                        Grid.Column="2"
+                        Margin="0,0,7,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource CaptionSecondaryStyle}"
+                        Text="위에서 명령을 눌러 실행하세요"
+                        Visibility="{x:Bind local:Converters.Collapsed(ViewModel.SelectedProject.CanStop), Mode=OneWay}" />
+                    <Button
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="StopButton"
+                        AutomationProperties.Name="정지"
+                        Command="{x:Bind ViewModel.SelectedProject.StopCommand, Mode=OneWay}"
+                        ToolTipService.ToolTip="정지 (Ctrl+Enter)"
+                        Visibility="{x:Bind ViewModel.SelectedProject.CanStop, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Rectangle Width="10" Height="10" VerticalAlignment="Center" Fill="{ThemeResource SystemFillColorCriticalBrush}" RadiusX="2" RadiusY="2" />
+                            <TextBlock Text="정지" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
 
+                <!-- Notices -->
+                <StackPanel Grid.Row="3" Spacing="8">
                     <InfoBar
                         x:Name="ErrorBar"
                         AutomationProperties.AutomationId="ErrorBar"
                         IsClosable="False"
                         IsOpen="{x:Bind ViewModel.SelectedProject.HasError, Mode=OneWay}"
                         Message="{x:Bind ViewModel.SelectedProject.ErrorMessage, Mode=OneWay}"
-                        Severity="Error">
+                        Severity="Error"
+                        Visibility="{x:Bind ViewModel.SelectedProject.HasError, Mode=OneWay}">
                         <InfoBar.ActionButton>
                             <Button
                                 AutomationProperties.AutomationId="ReassignPortButton"
@@ -478,7 +467,8 @@
                         IsClosable="False"
                         IsOpen="{x:Bind ViewModel.SelectedProject.RestartRequired, Mode=OneWay}"
                         Message="설정이 바뀌었습니다. 재시작하면 적용됩니다."
-                        Severity="Informational">
+                        Severity="Informational"
+                        Visibility="{x:Bind ViewModel.SelectedProject.RestartRequired, Mode=OneWay}">
                         <InfoBar.ActionButton>
                             <Button Command="{x:Bind ViewModel.SelectedProject.RestartCommand, Mode=OneWay}" Content="지금 재시작" />
                         </InfoBar.ActionButton>
@@ -487,7 +477,8 @@
                         IsClosable="False"
                         IsOpen="{x:Bind ViewModel.SelectedProject.HasRestartNote, Mode=OneWay}"
                         Message="{x:Bind ViewModel.SelectedProject.RestartNote, Mode=OneWay}"
-                        Severity="Warning">
+                        Severity="Warning"
+                        Visibility="{x:Bind ViewModel.SelectedProject.HasRestartNote, Mode=OneWay}">
                         <InfoBar.ActionButton>
                             <Button Command="{x:Bind ViewModel.SelectedProject.StopCommand, Mode=OneWay}" Content="재시작 취소" />
                         </InfoBar.ActionButton>
@@ -495,12 +486,14 @@
                 </StackPanel>
 
                 <!-- Scripts / commands -->
-                <Grid Grid.Row="3" ColumnSpacing="10">
+                <Grid Grid.Row="1" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" Padding="0,0,0,6">
+                    <TextBlock Margin="0,6,0,0" VerticalAlignment="Top" Style="{StaticResource CaptionSecondaryStyle}" Text="명령" />
+                    <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" Padding="0,0,0,6">
                     <ItemsControl AutomationProperties.AutomationId="ScriptChips" ItemsSource="{x:Bind ViewModel.SelectedProject.Chips, Mode=OneWay}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -509,33 +502,52 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:CommandChipViewModel">
-                                <Button
-                                    Padding="10,4"
-                                    AutomationProperties.Name="{x:Bind Label}"
-                                    Command="{x:Bind RunCommand}"
-                                    CornerRadius="12"
-                                    ToolTipService.ToolTip="{x:Bind Tooltip}">
-                                    <Button.ContextFlyout>
+                                <Grid>
+                                    <Grid.ContextFlyout>
                                         <MenuFlyout>
-                                            <MenuFlyoutItem Command="{x:Bind RunCommand}" Text="실행 / 중지" />
-                                            <MenuFlyoutItem Command="{x:Bind UseAsStartCommand}" IsEnabled="{x:Bind IsScript}" Text="시작 명령으로 사용" />
+                                            <MenuFlyoutItem Command="{x:Bind RunCommand}" IsEnabled="{x:Bind local:Converters.Not(IsRunning), Mode=OneWay}" Text="실행">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE768;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Command="{x:Bind RunCommand}" IsEnabled="{x:Bind IsRunning, Mode=OneWay}" Text="재시작">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Command="{x:Bind StopCommand}" IsEnabled="{x:Bind IsRunning, Mode=OneWay}" Text="정지">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71A;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutSeparator />
                                             <MenuFlyoutItem Command="{x:Bind HideCommand}" IsEnabled="{x:Bind IsScript}" Text="숨기기" />
                                         </MenuFlyout>
-                                    </Button.ContextFlyout>
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Grid Width="12" Height="12">
-                                            <FontIcon FontSize="10" Glyph="{x:Bind Glyph, Mode=OneWay}" Visibility="{x:Bind local:Converters.Collapsed(IsRunning), Mode=OneWay}" />
-                                            <ProgressRing Width="12" Height="12" MinWidth="12" MinHeight="12" IsActive="{x:Bind IsRunning, Mode=OneWay}" />
-                                        </Grid>
-                                        <TextBlock FontFamily="{StaticResource LogFontFamily}" FontSize="12" Text="{x:Bind Label}" />
-                                        <FontIcon FontSize="9" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE735;" ToolTipService.ToolTip="시작 명령" Visibility="{x:Bind IsStartScript}" />
-                                    </StackPanel>
-                                </Button>
+                                    </Grid.ContextFlyout>
+
+                                    <!-- Press to run it (whatever was running stops first). The running one is outlined; pressing it again restarts it. -->
+                                    <Button
+                                        Padding="9,4,11,5"
+                                        AutomationProperties.Name="{x:Bind Label}"
+                                        Background="Transparent"
+                                        Command="{x:Bind RunCommand}"
+                                        CornerRadius="6"
+                                        ToolTipService.ToolTip="{x:Bind Tooltip, Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE768;" Visibility="{x:Bind local:Converters.Collapsed(IsRunning), Mode=OneWay}" />
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource StateRunningBrush}" Glyph="&#xE72C;" Visibility="{x:Bind IsRunning, Mode=OneWay}" />
+                                            <TextBlock MaxWidth="240" FontSize="13" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE735;" Visibility="{x:Bind IsStartScript}" />
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource StateRunningBrush}" Glyph="&#xE73E;" Visibility="{x:Bind Succeeded, Mode=OneWay}" />
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource StateCrashedBrush}" Glyph="&#xE711;" Visibility="{x:Bind Failed, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Border
+                                        BorderBrush="{ThemeResource StateRunningBrush}"
+                                        BorderThickness="1.5"
+                                        CornerRadius="6"
+                                        IsHitTestVisible="False"
+                                        Visibility="{x:Bind IsRunning, Mode=OneWay}" />
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     </ScrollViewer>
-                    <Button Grid.Column="1" VerticalAlignment="Top" AutomationProperties.Name="명령 메뉴" Style="{StaticResource IconButtonStyle}" ToolTipService.ToolTip="명령 추가 · 숨긴 스크립트">
+                    <Button Grid.Column="2" VerticalAlignment="Top" AutomationProperties.Name="명령 메뉴" Style="{StaticResource IconButtonStyle}" ToolTipService.ToolTip="명령 추가 · 숨긴 스크립트">
                         <FontIcon FontSize="14" Glyph="&#xE710;" />
                         <Button.Flyout>
                             <MenuFlyout x:Name="ChipMenu" Opening="ChipMenu_Opening" Placement="BottomEdgeAlignedRight" />

@@ -198,6 +198,59 @@ public class ProjectManagerTests
     }
 
     [Fact]
+    public async Task Only_one_thing_runs_at_a_time()
+    {
+        using var data = new TempDir();
+        using var proj = new TempDir();
+        var m = new ProjectManager(new AppPaths(data.Path));
+        m.Load();
+        var r = m.AddProject(proj.Path);
+        var def = r.Definition.Clone();
+        def.StartCommand = "ping -n 30 127.0.0.1 >nul";
+        def.Commands.Add(new ProjectCommand { Name = "a", Command = "echo a-ran& ping -n 30 127.0.0.1 >nul" });
+        def.Commands.Add(new ProjectCommand { Name = "b", Command = "ping -n 30 127.0.0.1 >nul" });
+        m.UpdateProject(def);
+        var a = r.Definition.Commands[0];
+        var b = r.Definition.Commands[1];
+        string[] Running() => r.CommandRuns.Select(x => x.DisplayName).ToArray();
+        int Ran() => r.Log.Snapshot().Count(l => l.Text == "a-ran");
+        async Task WaitRan(int n) { for (int i = 0; i < 100 && Ran() < n; i++) await Task.Delay(20); }
+
+        await m.StartAsync(r.Id);
+        Assert.True(r.IsActive);
+
+        // Another command replaces the start command…
+        await m.RunCustomCommandAsync(r.Id, a);
+        Assert.False(r.IsActive);
+        Assert.Equal(ProjectState.Stopped, r.State);
+        Assert.Equal(["a"], Running());
+        await WaitRan(1);
+
+        // …a third replaces that one…
+        await m.RunCustomCommandAsync(r.Id, b);
+        Assert.Equal(["b"], Running());
+
+        // …running the same one again restarts it…
+        var first = r.CommandRuns[0].StartedAt;
+        await m.RunCustomCommandAsync(r.Id, b);
+        Assert.Equal(["b"], Running());
+        Assert.True(r.CommandRuns[0].StartedAt > first);
+
+        // …and the start command replaces it again.
+        await m.StartAsync(r.Id);
+        Assert.True(r.IsActive);
+        Assert.Empty(Running());
+
+        // Stop stops whichever it is.
+        await m.RunCustomCommandAsync(r.Id, a);
+        await WaitRan(2);
+        await m.StopAsync(r.Id);
+        Assert.False(r.IsActive);
+        Assert.Empty(Running());
+        Assert.Equal(2, Ran());
+    }
+
+    [Fact]
     public async Task Crash_is_reported_and_auto_restart_schedules()
     {
         using var data = new TempDir();

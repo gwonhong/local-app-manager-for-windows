@@ -203,7 +203,7 @@ public sealed class ProjectManager
     {
         var runtime = Get(id);
         if (runtime is null) return;
-        await runtime.StopAsync().ConfigureAwait(false);
+        await runtime.StopEverythingAsync().ConfigureAwait(false);
         runtime.KillAll();
         lock (_gate)
         {
@@ -256,13 +256,14 @@ public sealed class ProjectManager
 
     // ------------------------------------------------------------------ lifecycle
 
-    public Task StartAsync(string id) => Get(id)?.StartAsync() ?? Task.CompletedTask;
+    public Task StartAsync(string id) => Get(id)?.StartExclusiveAsync() ?? Task.CompletedTask;
 
-    public Task StopAsync(string id) => Get(id)?.StopAsync() ?? Task.CompletedTask;
+    /// <summary>Stops everything the project runs (start command and any other command).</summary>
+    public Task StopAsync(string id) => Get(id)?.StopEverythingAsync() ?? Task.CompletedTask;
 
     public Task RestartAsync(string id) => Get(id)?.RestartAsync() ?? Task.CompletedTask;
 
-    public Task StopAllAsync() => Task.WhenAll(Projects.Select(p => p.StopAsync()));
+    public Task StopAllAsync() => Task.WhenAll(Projects.Select(p => p.StopEverythingAsync()));
 
     /// <summary>Kills every process tree right away (app exit). Job objects would do it anyway when the process dies.</summary>
     public void KillAll()
@@ -272,7 +273,7 @@ public sealed class ProjectManager
 
     /// <summary>Starts the projects marked "start with app".</summary>
     public Task StartAutoStartProjectsAsync() =>
-        Task.WhenAll(Projects.Where(p => p.Definition.StartWithApp).Select(p => p.StartAsync()));
+        Task.WhenAll(Projects.Where(p => p.Definition.StartWithApp).Select(p => p.StartExclusiveAsync()));
 
     // ------------------------------------------------------------------ commands
 
@@ -280,18 +281,19 @@ public sealed class ProjectManager
 
     public static string CommandKey(string name) => "cmd:" + name;
 
-    public void RunScript(string id, string script)
+    /// <summary>Runs a package.json script, stopping whatever the project was running (one run at a time).</summary>
+    public Task RunScriptAsync(string id, string script)
     {
         var runtime = Get(id);
-        if (runtime is null) return;
-        runtime.RunCommand(ScriptKey(script), script, CommandBuilder.ScriptCommand(runtime.Definition, script));
+        if (runtime is null) return Task.CompletedTask;
+        return runtime.RunCommandExclusiveAsync(ScriptKey(script), script, CommandBuilder.ScriptCommand(runtime.Definition, script));
     }
 
-    public void RunCustomCommand(string id, ProjectCommand command)
+    public Task RunCustomCommandAsync(string id, ProjectCommand command)
     {
         var runtime = Get(id);
-        if (runtime is null || string.IsNullOrWhiteSpace(command.Command)) return;
-        runtime.RunCommand(CommandKey(command.Name), command.Name, command.Command);
+        if (runtime is null || string.IsNullOrWhiteSpace(command.Command)) return Task.CompletedTask;
+        return runtime.RunCommandExclusiveAsync(CommandKey(command.Name), command.Name, command.Command);
     }
 
     public void StopCommand(string id, string key) => Get(id)?.StopCommand(key);
@@ -337,7 +339,7 @@ public sealed class ProjectManager
         }
     }
 
-    public Task StartGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StartAsync()));
+    public Task StartGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StartExclusiveAsync()));
 
-    public Task StopGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StopAsync()));
+    public Task StopGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StopEverythingAsync()));
 }

@@ -65,7 +65,7 @@ public sealed partial class MainPage : Page
         AddAccelerator(VirtualKey.Enter, VirtualKeyModifiers.Control, () => ViewModel.SelectedProject?.ToggleCommand.Execute(null));
         AddAccelerator(VirtualKey.R, VirtualKeyModifiers.Control, () =>
         {
-            if (ViewModel.SelectedProject is { IsActive: true } p) p.RestartCommand.Execute(null);
+            if (ViewModel.SelectedProject is { IsRunningAny: true } p) p.RestartCommand.Execute(null);
         });
         AddAccelerator(VirtualKey.L, VirtualKeyModifiers.Control, () => ViewModel.Log.Clear());
     }

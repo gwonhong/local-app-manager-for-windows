@@ -27,7 +27,7 @@ public sealed class ProjectRuntime
     private readonly object _gate = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly Func<IReadOnlyDictionary<string, string>> _baseEnvironment;
-    private readonly Dictionary<string, (ProcessSession Session, CommandRunInfo Info)> _commandRuns = new();
+    private readonly Dictionary<string, (ProcessSession Session, CommandRunInfo Info, TaskCompletionSource Done)> _commandRuns = new();
     private readonly Dictionary<string, int> _lastCommandExit = new();
     private ProcessSession? _session;
     private CancellationTokenSource? _readinessCts;
@@ -227,11 +227,76 @@ public sealed class ProjectRuntime
         for (int i = 0; i < 50 && ReferenceEquals(_session, session); i++) await Task.Delay(10).ConfigureAwait(false);
     }
 
-    internal async Task RestartAsync()
+    // ------------------------------------------------------------------ one run at a time
+    //
+    // A project runs one thing at a time: the start command or one other command. Starting anything
+    // first stops whatever is running ("switching"). A stop the user asks for while a switch is still
+    // stopping the old run wins: the new command isn't started.
+
+    private readonly SemaphoreSlim _switch = new(1, 1);
+    private int _userStops;
+
+    /// <summary>Stops the start command and every other command.</summary>
+    internal Task StopEverythingAsync()
     {
-        await StopAsync().ConfigureAwait(false);
-        await StartAsync().ConfigureAwait(false);
+        Interlocked.Increment(ref _userStops);
+        return StopAllCoreAsync();
     }
+
+    private Task StopAllCoreAsync() => Task.WhenAll(StopAsync(), StopCommandsAsync());
+
+    private async Task StopCommandsAsync()
+    {
+        List<(ProcessSession Session, Task Done)> runs;
+        lock (_gate) runs = _commandRuns.Values.Select(v => (v.Session, (Task)v.Done.Task)).ToList();
+        await Task.WhenAll(runs.Select(async run =>
+        {
+            try
+            {
+                await run.Session.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // It finished on its own in the meantime.
+            }
+            await run.Done.ConfigureAwait(false);
+        })).ConfigureAwait(false);
+    }
+
+    private async Task SwitchAsync(Func<Task> start)
+    {
+        int stops = Volatile.Read(ref _userStops);
+        await _switch.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopAllCoreAsync().ConfigureAwait(false);
+            if (stops != Volatile.Read(ref _userStops)) return;
+            await start().ConfigureAwait(false);
+        }
+        finally
+        {
+            _switch.Release();
+        }
+    }
+
+    /// <summary>Starts the start command, stopping any other command first. Does nothing if it already runs.</summary>
+    internal Task StartExclusiveAsync()
+    {
+        bool commandsRunning;
+        lock (_gate) commandsRunning = _commandRuns.Count > 0;
+        return IsActive && !commandsRunning ? Task.CompletedTask : commandsRunning ? SwitchAsync(StartAsync) : StartAsync();
+    }
+
+    /// <summary>Stops whatever runs and starts the start command.</summary>
+    internal Task RestartAsync() => SwitchAsync(StartAsync);
+
+    /// <summary>Stops whatever runs (including an earlier run of the same command) and runs this command.</summary>
+    internal Task RunCommandExclusiveAsync(string key, string displayName, string command) =>
+        SwitchAsync(() =>
+        {
+            RunCommand(key, displayName, command);
+            return Task.CompletedTask;
+        });
 
     /// <summary>Kills everything immediately (app shutdown). Doesn't wait.</summary>
     internal void KillAll()
@@ -241,7 +306,7 @@ public sealed class ProjectRuntime
         lock (_gate)
         {
             _session?.Kill();
-            foreach (var (s, _) in _commandRuns.Values) s.Kill();
+            foreach (var run in _commandRuns.Values) run.Session.Kill();
         }
     }
 
@@ -480,7 +545,8 @@ public sealed class ProjectRuntime
             return;
         }
         var info = new CommandRunInfo(key, displayName, built.ShellCommand, true, null, session.StartedAt);
-        lock (_gate) _commandRuns[key] = (session, info);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_gate) _commandRuns[key] = (session, info, done);
         Log.System($"▶ {built.ShellCommand}", displayName);
         RaiseChanged();
 
@@ -498,6 +564,7 @@ public sealed class ProjectRuntime
             if (stopped) Log.System("■ 중지했습니다.", displayName);
             else if (code == 0) Log.System($"✔ 완료 ({FormatDuration(elapsed)})", displayName);
             else Log.Error($"✖ 실패 (코드 {FormatExitCode(code)}, {FormatDuration(elapsed)})", displayName);
+            done.TrySetResult();
             RaiseChanged();
         });
     }
