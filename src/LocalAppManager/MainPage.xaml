@@ -383,15 +383,6 @@
                             </Button.Flyout>
                         </Button>
                         <Button
-                            AutomationProperties.AutomationId="OpenBrowserButton"
-                            AutomationProperties.Name="브라우저로 열기"
-                            Command="{x:Bind ViewModel.SelectedProject.OpenBrowserCommand, Mode=OneWay}"
-                            IsEnabled="{x:Bind ViewModel.SelectedProject.HasUrl, Mode=OneWay}"
-                            Style="{StaticResource IconButtonStyle}"
-                            ToolTipService.ToolTip="브라우저로 열기">
-                            <FontIcon FontSize="16" Glyph="&#xE774;" />
-                        </Button>
-                        <Button
                             AutomationProperties.Name="VS Code로 열기"
                             Command="{x:Bind ViewModel.SelectedProject.OpenInCodeCommand, Mode=OneWay}"
                             Style="{StaticResource IconButtonStyle}"
