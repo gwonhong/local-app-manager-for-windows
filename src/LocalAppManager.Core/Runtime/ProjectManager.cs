@@ -59,18 +59,39 @@ public sealed class ProjectManager
         Settings = JsonStore.Load<AppSettings>(Paths.SettingsFile);
         ApplyRuntimeSettings();
         var doc = JsonStore.Load<ProjectsDocument>(Paths.ProjectsFile);
+        bool migrated = false;
         lock (_gate)
         {
             _projects.Clear();
             foreach (var def in doc.Projects)
             {
                 Normalize(def);
+                // Older files have a separate "start command"; it becomes the first chip.
+                if (CommandList.MigrateStartCommand(def, FrameworkDetector.ReadScripts(def.Path)))
+                {
+                    migrated = true;
+                    AppLog.Info($"migrated start command of '{def.Name}' into its chip list");
+                }
                 _projects.Add(CreateRuntime(def));
             }
             _groups.Clear();
             _groups.AddRange(doc.Groups);
         }
         AppLog.Info($"loaded {doc.Projects.Count} projects, {doc.Groups.Count} groups from {Paths.ProjectsFile}");
+        if (migrated)
+        {
+            // Keep the file as it was before this format change, once, in case the migration needs undoing.
+            string backup = Paths.ProjectsFile + ".before-commands.bak";
+            try
+            {
+                if (File.Exists(Paths.ProjectsFile) && !File.Exists(backup)) File.Copy(Paths.ProjectsFile, backup);
+            }
+            catch (IOException e)
+            {
+                AppLog.Warn($"could not back up projects.json before migrating: {e.Message}");
+            }
+            SaveProjects();
+        }
         ProjectsChanged?.Invoke();
     }
 
@@ -127,7 +148,12 @@ public sealed class ProjectManager
         def.PortArgs ??= "--port {port}";
         def.PortEnvVar ??= "PORT";
         def.BrowserPath ??= "/";
-        def.StartCommand ??= "";
+        foreach (var c in def.Commands)
+        {
+            c.Name ??= "";
+            c.Command ??= "";
+            if (c.Script is { Length: 0 }) c.Script = null;
+        }
         def.Name = string.IsNullOrWhiteSpace(def.Name) ? Path.GetFileName(def.Path.TrimEnd('\\')) : def.Name;
     }
 
@@ -163,14 +189,20 @@ public sealed class ProjectManager
             Path = path,
             Framework = detection.Framework.Id,
             PackageManager = detection.PackageManager,
-            StartCommand = detection.StartCommand,
             PortMode = detection.Framework.PortMode,
             PortArgs = detection.Framework.PortArgs,
         };
+        // The detected dev command goes first and is the default (the list's ▶ runs it); other scripts follow on their own.
+        if (!string.IsNullOrWhiteSpace(detection.StartCommand))
+        {
+            var start = CommandList.FromCommandLine(detection.StartCommand);
+            def.Commands.Add(start);
+            def.DefaultCommand = CommandList.KeyOf(start);
+        }
 
         var runtime = CreateRuntime(def);
         lock (_gate) _projects.Add(runtime);
-        AppLog.Info($"added project '{def.Name}' ({def.Framework}, {def.PackageManager ?? "-"}) port={def.Port} cmd='{def.StartCommand}'");
+        AppLog.Info($"added project '{def.Name}' ({def.Framework}, {def.PackageManager ?? "-"}) cmd='{detection.StartCommand}'");
         runtime.Log.System($"등록했습니다: {detection.Framework.DisplayName}" + (def.PackageManager is { } pm ? $" · {pm}" : "") + (def.Port is int port ? $" · 포트 {port}" : ""));
         SaveProjects();
         ProjectsChanged?.Invoke();
@@ -297,12 +329,35 @@ public sealed class ProjectManager
 
     // ------------------------------------------------------------------ lifecycle
 
-    public Task StartAsync(string id) => Get(id)?.StartExclusiveAsync() ?? Task.CompletedTask;
+    /// <summary>Runs the project's default chip, unless something already runs.</summary>
+    public Task StartAsync(string id) => Get(id) is { } r ? StartDefaultAsync(r) : Task.CompletedTask;
 
-    /// <summary>Stops everything the project runs (start command and any other command).</summary>
+    private Task StartDefaultAsync(ProjectRuntime runtime)
+    {
+        if (runtime.IsActive) return Task.CompletedTask;
+        var command = CommandList.DefaultOf(runtime.Definition, GetCommands(runtime));
+        if (command is null)
+        {
+            runtime.Log.Error("실행할 명령이 없습니다. 명령 칩을 추가하세요.");
+            return Task.CompletedTask;
+        }
+        return runtime.StartIfIdleAsync(command);
+    }
+
+    /// <summary>Stops whatever the project runs.</summary>
     public Task StopAsync(string id) => Get(id)?.StopEverythingAsync() ?? Task.CompletedTask;
 
-    public Task RestartAsync(string id) => Get(id)?.RestartAsync() ?? Task.CompletedTask;
+    /// <summary>Runs the current (or last) command again; the default chip if nothing has run yet.</summary>
+    public Task RestartAsync(string id)
+    {
+        var runtime = Get(id);
+        if (runtime is null) return Task.CompletedTask;
+        // Re-resolve by key so an edited command or a changed package manager applies.
+        var key = runtime.LastCommand?.Key;
+        var commands = GetCommands(runtime);
+        var command = commands.FirstOrDefault(c => c.Key == key) ?? runtime.LastCommand ?? CommandList.DefaultOf(runtime.Definition, commands);
+        return command is null ? Task.CompletedTask : runtime.RunAsync(command);
+    }
 
     public Task StopAllAsync() => Task.WhenAll(Projects.Select(p => p.StopEverythingAsync()));
 
@@ -312,28 +367,54 @@ public sealed class ProjectManager
         foreach (var p in Projects) p.KillAll();
     }
 
-    // ------------------------------------------------------------------ commands
+    // ------------------------------------------------------------------ commands (chips)
 
-    public static string ScriptKey(string script) => "script:" + script;
+    /// <summary>The project's chips in order (custom order, then package.json scripts it doesn't mention).</summary>
+    public IReadOnlyList<ResolvedCommand> GetCommands(string id) =>
+        Get(id) is { } r ? GetCommands(r) : [];
 
-    public static string CommandKey(string name) => "cmd:" + name;
+    private static IReadOnlyList<ResolvedCommand> GetCommands(ProjectRuntime runtime) =>
+        CommandList.Resolve(runtime.Definition, FrameworkDetector.ReadScripts(runtime.Definition.Path));
 
-    /// <summary>Runs a package.json script, stopping whatever the project was running (one run at a time).</summary>
-    public Task RunScriptAsync(string id, string script)
+    /// <summary>
+    /// Runs one chip, stopping whatever the project was running (one run at a time). Running the chip that already
+    /// runs restarts it.
+    /// </summary>
+    public Task RunAsync(string id, string key)
     {
         var runtime = Get(id);
         if (runtime is null) return Task.CompletedTask;
-        return runtime.RunCommandExclusiveAsync(ScriptKey(script), script, CommandBuilder.ScriptCommand(runtime.Definition, script));
+        var command = GetCommands(runtime).FirstOrDefault(c => c.Key == key);
+        return command is null ? Task.CompletedTask : runtime.RunAsync(command);
     }
 
-    public Task RunCustomCommandAsync(string id, ProjectCommand command)
+    /// <summary>Makes the chip <paramref name="key"/> the default (what ▶, the tray and groups run) and saves.</summary>
+    public void SetDefaultCommand(string id, string key)
     {
         var runtime = Get(id);
-        if (runtime is null || string.IsNullOrWhiteSpace(command.Command)) return Task.CompletedTask;
-        return runtime.RunCommandExclusiveAsync(CommandKey(command.Name), command.Name, command.Command);
+        if (runtime is null || runtime.Definition.DefaultCommand == key) return;
+        var def = runtime.Definition.Clone();
+        def.DefaultCommand = key;
+        UpdateProject(def);
     }
 
-    public void StopCommand(string id, string key) => Get(id)?.StopCommand(key);
+    /// <summary>
+    /// Replaces the chip list with <paramref name="ordered"/> (from the command panel) and saves, with
+    /// <paramref name="defaultKey"/> as the default chip. Scripts left out are remembered as hidden, so they aren't
+    /// appended again; scripts put back are un-hidden.
+    /// </summary>
+    public void SetCommands(string id, IReadOnlyList<ProjectCommand> ordered, string? defaultKey)
+    {
+        var runtime = Get(id);
+        if (runtime is null) return;
+        var def = runtime.Definition.Clone();
+        var scripts = FrameworkDetector.ReadScripts(def.Path);
+        def.Commands = ordered.Select(c => c.Clone()).ToList();
+        def.DefaultCommand = defaultKey;
+        var listed = def.Commands.Where(c => c.Script is not null).Select(c => c.Script!).ToHashSet();
+        def.HiddenScripts = scripts.Keys.Where(s => !listed.Contains(s)).ToList();
+        UpdateProject(def);
+    }
 
     // ------------------------------------------------------------------ groups
 
@@ -376,7 +457,7 @@ public sealed class ProjectManager
         }
     }
 
-    public Task StartGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StartExclusiveAsync()));
+    public Task StartGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(StartDefaultAsync));
 
     public Task StopGroupAsync(string groupId) => Task.WhenAll(GroupMembers(groupId).Select(p => p.StopEverythingAsync()));
 }

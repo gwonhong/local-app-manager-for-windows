@@ -27,7 +27,12 @@ WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용�
   - 로그에 찍힌 URL은 밑줄 친 링크가 되고, 클릭하면 브라우저로 엽니다(0.0.0.0, [::]는 localhost로).
   - 실행 중인 프로세스에 입력을 보낼 수 있습니다.
   - cmd의 한글 메시지(CP949)도 깨지지 않습니다.
-- **명령**: package.json 스크립트와 사용자 정의 명령(`이름: 명령`, `{port}` 사용 가능)을 칩으로 보여 줍니다. 칩을 누르면 실행하고, 다른 칩을 누르면 그쪽으로 바꾸고, 실행 중인 칩을 다시 누르면 재시작합니다. 프로젝트마다 한 번에 하나만 실행합니다. 실행 표시줄에 무엇이 얼마나 돌고 있는지와 정지 버튼이 있습니다. ★ 칩이 기본 명령입니다(목록의 ▶, 트레이, 그룹이 실행하는 명령).
+- **명령**: package.json 스크립트와 사용자 정의 명령(`{port}` 사용 가능)을 칩으로 보여 줍니다.
+  - 칩을 누르면 실행하고, 다른 칩을 누르면 그쪽으로 바꾸고, 실행 중인 칩을 다시 누르면 재시작합니다. 프로젝트마다 한 번에 하나만 실행합니다.
+  - ★ 칩이 기본 명령입니다(목록의 ▶, 트레이, 그룹이 실행). 칩 우클릭 "기본 명령으로"나 명령 관리 창의 ☆로 바꿉니다.
+  - 명령 관리 창(칩 줄 오른쪽 버튼)에서 끌어서 순서를 바꾸고, 기본 명령을 고르고, 명령을 추가·수정·삭제하고, 뺀 스크립트를 다시 넣습니다. package.json에 새로 생긴 스크립트는 저절로 뒤에 붙습니다.
+  - 서버를 띄우는 명령(vite, next dev, runserver 등)은 고정 포트를 받고, 포트가 열려야 "실행 중"이 되고, 크래시하면 알림과 자동 재시작을 받습니다. build나 lint 같은 명령은 "완료"/"실패"로만 끝납니다.
+  - 실행 표시줄에 무엇이 얼마나 돌고 있는지와 정지 버튼이 있습니다.
 - **그룹**: 여러 프로젝트를 묶어 한 번에 시작/정지합니다.
 - **열기**: 브라우저(실행 표시줄의 주소 링크, 로그의 URL, 목록 우클릭 메뉴), VS Code, 탐색기, 터미널(Windows Terminal, PowerShell, cmd).
 - **시스템 연동**:
@@ -66,6 +71,17 @@ dotnet publish src/LocalAppManager/LocalAppManager.csproj -c Release -p:Platform
 ```powershell
 dotnet test tests/LocalAppManager.Core.Tests/LocalAppManager.Core.Tests.csproj
 ```
+
+### 릴리스
+
+`v`로 시작하는 버전 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 테스트를 돌리고 x64와 ARM64 빌드를 zip으로 묶어 GitHub Releases에 올립니다. 일반 커밋 push로는 아무것도 실행되지 않습니다.
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+버전은 태그에서 정해집니다(`v0.2.0` → 0.2.0). `v0.3.0-beta.1`처럼 `-`가 붙은 태그는 pre-release로 올라갑니다. 릴리스 노트는 이전 태그 이후의 커밋과 PR로 자동 생성됩니다.
 
 ## 명령줄
 

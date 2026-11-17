@@ -43,7 +43,7 @@ void PrintLog()
     }
 }
 
-Console.WriteLine($"framework={project.Definition.Framework} pm={project.Definition.PackageManager} port={project.Definition.Port} cmd='{project.Definition.StartCommand}'");
+Console.WriteLine($"framework={project.Definition.Framework} pm={project.Definition.PackageManager} port={project.Definition.Port} first='{manager.GetCommands(project.Id).FirstOrDefault()?.ShellCommand}'");
 await manager.StartAsync(project.Id);
 var sw = Stopwatch.StartNew();
 while (project.State == ProjectState.Starting && sw.Elapsed < TimeSpan.FromSeconds(30))

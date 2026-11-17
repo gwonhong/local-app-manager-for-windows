@@ -11,10 +11,18 @@ public enum PortMode
     Args,
 }
 
+/// <summary>One chip: a package.json script (<see cref="Script"/>) or a custom shell command.</summary>
 public sealed class ProjectCommand
 {
     public string Name { get; set; } = "";
+
+    /// <summary>Shell command run through cmd.exe (may contain <c>{port}</c>). Empty for a package.json script.</summary>
     public string Command { get; set; } = "";
+
+    /// <summary>The package.json script this chip runs with the package manager, or null for a custom command.</summary>
+    public string? Script { get; set; }
+
+    public ProjectCommand Clone() => new() { Name = Name, Command = Command, Script = Script };
 }
 
 /// <summary>Persisted definition of a registered project. Runtime state lives in <see cref="Runtime.ProjectRuntime"/>.</summary>
@@ -30,8 +38,11 @@ public sealed class ProjectDefinition
     /// <summary>npm / pnpm / yarn / bun, or null for non-Node projects.</summary>
     public string? PackageManager { get; set; }
 
-    /// <summary>Shell command run through cmd.exe. May contain <c>{port}</c>.</summary>
-    public string StartCommand { get; set; } = "";
+    /// <summary>
+    /// Legacy: the single "start command" from before chips were ordered. Moved into <see cref="Commands"/>
+    /// (as the first chip) when projects.json is loaded, then cleared. Not written anymore.
+    /// </summary>
+    public string? StartCommand { get; set; }
 
     /// <summary>
     /// Pinned port, passed to the server on every start (see <see cref="PortMode"/>). Null (the default) means the
@@ -50,15 +61,24 @@ public sealed class ProjectDefinition
     /// <summary>Variable set in <see cref="PortMode.Env"/> mode.</summary>
     public string PortEnvVar { get; set; } = "PORT";
 
-    /// <summary>Extra commands (build, lint…) besides package.json scripts.</summary>
+    /// <summary>
+    /// The chips, in order. package.json scripts not listed here (and not hidden) are appended after these;
+    /// see <see cref="CommandList"/>.
+    /// </summary>
     public List<ProjectCommand> Commands { get; set; } = [];
 
-    /// <summary>package.json scripts hidden from the chip row.</summary>
+    /// <summary>
+    /// Key of the default chip ("script:dev", "cmd:start"): what "start" runs (the list's ▶, tray, groups).
+    /// Null or a chip that no longer exists means the first chip.
+    /// </summary>
+    public string? DefaultCommand { get; set; }
+
+    /// <summary>package.json scripts removed from the chip row (so they aren't appended again).</summary>
     public List<string> HiddenScripts { get; set; } = [];
 
     public Dictionary<string, string> Environment { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Restart automatically (with backoff) when the start command crashes.</summary>
+    /// <summary>Restart automatically (with backoff) when a server command crashes.</summary>
     public bool AutoRestart { get; set; }
 
     /// <summary>Path opened by "Open in browser", e.g. "/admin". The host and port come from the run.</summary>
@@ -69,7 +89,7 @@ public sealed class ProjectDefinition
     public ProjectDefinition Clone()
     {
         var c = (ProjectDefinition)MemberwiseClone();
-        c.Commands = Commands.Select(x => new ProjectCommand { Name = x.Name, Command = x.Command }).ToList();
+        c.Commands = Commands.Select(x => x.Clone()).ToList();
         c.HiddenScripts = [.. HiddenScripts];
         c.Environment = new Dictionary<string, string>(Environment, StringComparer.OrdinalIgnoreCase);
         return c;

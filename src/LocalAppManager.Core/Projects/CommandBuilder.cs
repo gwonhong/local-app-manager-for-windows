@@ -2,7 +2,8 @@ using System.Text.RegularExpressions;
 
 namespace LocalAppManager.Core.Projects;
 
-public sealed record BuiltCommand(string ShellCommand, string CommandLine, Dictionary<string, string> Environment);
+/// <param name="PortPassed">The pinned port reaches the server (placeholder, appended arguments, or env var on a server command).</param>
+public sealed record BuiltCommand(string ShellCommand, string CommandLine, Dictionary<string, string> Environment, bool PortPassed = false);
 
 /// <summary>Turns a project definition into the command line and environment of the child process.</summary>
 public static partial class CommandBuilder
@@ -17,25 +18,34 @@ public static partial class CommandBuilder
         ["PYTHONIOENCODING"] = "utf-8",
     };
 
-    /// <summary>The start command with the port applied.</summary>
-    public static BuiltCommand BuildStart(ProjectDefinition project, IReadOnlyDictionary<string, string> baseEnvironment)
+    /// <summary>
+    /// Any chip's command with the pinned port applied. <c>{port}</c> always expands. Otherwise the port is passed
+    /// the project's way (<see cref="PortMode"/>), but appended arguments only go to a server command:
+    /// <c>vite build --port 4100</c> or <c>eslint . --port 4100</c> would fail. The env var is harmless, so every
+    /// command gets it.
+    /// </summary>
+    public static BuiltCommand Build(ProjectDefinition project, string command, bool isServer, IReadOnlyDictionary<string, string> baseEnvironment)
     {
         var env = MergeEnvironment(project, baseEnvironment);
-        string command = project.StartCommand.Trim();
+        command = command.Trim();
+        bool passed = false;
 
         if (project.Port is int port)
         {
             if (command.Contains("{port}", StringComparison.Ordinal))
             {
                 command = command.Replace("{port}", port.ToString(), StringComparison.Ordinal);
+                passed = true;
             }
-            else if (project.PortMode == PortMode.Args && !string.IsNullOrWhiteSpace(project.PortArgs))
+            else if (project.PortMode == PortMode.Args && isServer && !string.IsNullOrWhiteSpace(project.PortArgs))
             {
                 command = AppendArguments(command, project.PortArgs.Replace("{port}", port.ToString(), StringComparison.Ordinal));
+                passed = true;
             }
             else if (project.PortMode == PortMode.Env)
             {
                 env[string.IsNullOrWhiteSpace(project.PortEnvVar) ? "PORT" : project.PortEnvVar.Trim()] = port.ToString();
+                passed = isServer;
             }
         }
 
@@ -44,16 +54,7 @@ public static partial class CommandBuilder
             foreach (var (k, v) in fw.ExtraEnv)
                 if (!project.Environment.ContainsKey(k)) env[k] = v;
 
-        return new BuiltCommand(command, WrapInCmd(command), env);
-    }
-
-    /// <summary>Any other command (scripts, build, lint). <c>{port}</c> still expands to the project's port.</summary>
-    public static BuiltCommand BuildOther(ProjectDefinition project, string command, IReadOnlyDictionary<string, string> baseEnvironment)
-    {
-        var env = MergeEnvironment(project, baseEnvironment);
-        if (project.Port is int port)
-            command = command.Replace("{port}", port.ToString(), StringComparison.Ordinal);
-        return new BuiltCommand(command, WrapInCmd(command), env);
+        return new BuiltCommand(command, WrapInCmd(command), env, passed);
     }
 
     /// <summary>The command that runs a package.json script with the project's package manager.</summary>

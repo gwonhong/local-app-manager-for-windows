@@ -73,8 +73,8 @@ public class FrameworkDetectorTests
             Assert.Equal("django", r.Framework.Id);
             Assert.Equal("python manage.py runserver", r.StartCommand);
             Assert.True(r.Framework.CanPinPort);
-            var pinned = new ProjectDefinition { StartCommand = r.StartCommand, Port = 4300, PortMode = r.Framework.PortMode, PortArgs = r.Framework.PortArgs };
-            Assert.Equal("python manage.py runserver 4300", CommandBuilder.BuildStart(pinned, new Dictionary<string, string>()).ShellCommand);
+            var pinned = new ProjectDefinition { Port = 4300, PortMode = r.Framework.PortMode, PortArgs = r.Framework.PortArgs };
+            Assert.Equal("python manage.py runserver 4300", CommandBuilder.Build(pinned, r.StartCommand, isServer: true, new Dictionary<string, string>()).ShellCommand);
         }
         using (var d = new TempDir().File("pyproject.toml", "[project]\ndependencies = [\"fastapi>=0.110\", \"uvicorn\"]\n").File("uv.lock").File("app/main.py", "api = FastAPI()\n"))
         {
@@ -96,8 +96,8 @@ public class CommandBuilderTests
     [Fact]
     public void Npm_gets_double_dash_for_args()
     {
-        var def = new ProjectDefinition { StartCommand = "npm run dev", Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port} --strictPort" };
-        Assert.Equal("npm run dev -- --port 4100 --strictPort", CommandBuilder.BuildStart(def, NoEnv).ShellCommand);
+        var def = new ProjectDefinition { Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port} --strictPort" };
+        Assert.Equal("npm run dev -- --port 4100 --strictPort", CommandBuilder.Build(def, "npm run dev", true, NoEnv).ShellCommand);
     }
 
     [Theory]
@@ -107,23 +107,38 @@ public class CommandBuilderTests
     [InlineData("npx vite")]
     public void Other_managers_get_args_directly(string cmd)
     {
-        var def = new ProjectDefinition { StartCommand = cmd, Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port} --strictPort" };
-        Assert.Equal($"{cmd} --port 4100 --strictPort", CommandBuilder.BuildStart(def, NoEnv).ShellCommand);
+        var def = new ProjectDefinition { Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port} --strictPort" };
+        Assert.Equal($"{cmd} --port 4100 --strictPort", CommandBuilder.Build(def, cmd, true, NoEnv).ShellCommand);
     }
 
     [Fact]
     public void Existing_double_dash_is_reused()
     {
-        var def = new ProjectDefinition { StartCommand = "npm run dev -- --host", Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port}" };
-        Assert.Equal("npm run dev -- --host --port 4100", CommandBuilder.BuildStart(def, NoEnv).ShellCommand);
+        var def = new ProjectDefinition { Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port}" };
+        Assert.Equal("npm run dev -- --host --port 4100", CommandBuilder.Build(def, "npm run dev -- --host", true, NoEnv).ShellCommand);
+    }
+
+    [Fact]
+    public void Args_go_only_to_server_commands_env_goes_to_all()
+    {
+        var args = new ProjectDefinition { Port = 4100, PortMode = PortMode.Args, PortArgs = "--port {port} --strictPort" };
+        var build = CommandBuilder.Build(args, "pnpm run build", isServer: false, NoEnv);
+        Assert.Equal("pnpm run build", build.ShellCommand); // "vite build --port" would fail
+        Assert.False(build.PortPassed);
+
+        var env = new ProjectDefinition { Port = 4200, PortMode = PortMode.Env };
+        var lint = CommandBuilder.Build(env, "pnpm run lint", isServer: false, NoEnv);
+        Assert.Equal("4200", lint.Environment["PORT"]); // harmless for a non-server
+        Assert.False(lint.PortPassed); // …and no port check / readiness for it
+        Assert.True(CommandBuilder.Build(env, "pnpm run dev", isServer: true, NoEnv).PortPassed);
     }
 
     [Fact]
     public void Env_mode_sets_port_and_defaults()
     {
-        var def = new ProjectDefinition { StartCommand = "npm run dev", Port = 4200, PortMode = PortMode.Env, Framework = "cra" };
+        var def = new ProjectDefinition { Port = 4200, PortMode = PortMode.Env, Framework = "cra" };
         def.Environment["FORCE_COLOR"] = "0";
-        var built = CommandBuilder.BuildStart(def, NoEnv);
+        var built = CommandBuilder.Build(def, "npm run dev", true, NoEnv);
         Assert.Equal("npm run dev", built.ShellCommand);
         Assert.Equal("4200", built.Environment["PORT"]);
         Assert.Equal("0", built.Environment["FORCE_COLOR"]); // user override wins
@@ -134,17 +149,17 @@ public class CommandBuilderTests
     [Fact]
     public void Inherited_no_color_is_dropped()
     {
-        var def = new ProjectDefinition { StartCommand = "x" };
-        Assert.False(CommandBuilder.BuildStart(def, new Dictionary<string, string> { ["NO_COLOR"] = "1" }).Environment.ContainsKey("NO_COLOR"));
+        var def = new ProjectDefinition();
+        Assert.False(CommandBuilder.Build(def, "x", true, new Dictionary<string, string> { ["NO_COLOR"] = "1" }).Environment.ContainsKey("NO_COLOR"));
         def.Environment["NO_COLOR"] = "1";
-        Assert.Equal("1", CommandBuilder.BuildStart(def, new Dictionary<string, string>()).Environment["NO_COLOR"]);
+        Assert.Equal("1", CommandBuilder.Build(def, "x", true, new Dictionary<string, string>()).Environment["NO_COLOR"]);
     }
 
     [Fact]
     public void Placeholder_overrides_mode()
     {
-        var def = new ProjectDefinition { StartCommand = "python manage.py runserver {port}", Port = 4300, PortMode = PortMode.Env };
-        var built = CommandBuilder.BuildStart(def, NoEnv);
+        var def = new ProjectDefinition { Port = 4300, PortMode = PortMode.Env };
+        var built = CommandBuilder.Build(def, "python manage.py runserver {port}", false, NoEnv);
         Assert.Equal("python manage.py runserver 4300", built.ShellCommand);
         Assert.False(built.Environment.ContainsKey("PORT"));
     }
@@ -154,8 +169,115 @@ public class CommandBuilderTests
         Assert.EndsWith(" /d /s /c \"pnpm run dev\"", CommandBuilder.WrapInCmd("pnpm run dev"));
 }
 
+public class CommandListTests
+{
+    private static readonly Dictionary<string, string> Scripts = new() { ["dev"] = "vite", ["build"] = "vite build", ["lint"] = "eslint ." };
+
+    [Fact]
+    public void Custom_order_first_then_unlisted_scripts()
+    {
+        var def = new ProjectDefinition { PackageManager = "pnpm" };
+        def.Commands.Add(new ProjectCommand { Name = "lint", Script = "lint" });
+        def.Commands.Add(new ProjectCommand { Name = "tunnel", Command = "cloudflared tunnel run" });
+        def.Commands.Add(new ProjectCommand { Name = "gone", Script = "gone" }); // not in package.json anymore
+        def.HiddenScripts.Add("build");
+        var list = CommandList.Resolve(def, Scripts);
+        Assert.Equal(["lint", "tunnel", "dev"], list.Select(c => c.Name));
+        Assert.Equal("pnpm run lint", list[0].ShellCommand);
+        Assert.Equal("cmd:tunnel", list[1].Key);
+        Assert.Equal("script:dev", list[2].Key);
+    }
+
+    [Theory]
+    [InlineData("pnpm run dev", "dev")]
+    [InlineData("npm start", "start")]
+    [InlineData("yarn dev", "dev")]
+    [InlineData("npm run build:prod", "build:prod")]
+    [InlineData("python manage.py runserver", null)]
+    [InlineData("pnpm install", null)]
+    public void Script_of_a_command_line(string command, string? script) =>
+        Assert.Equal(script, CommandList.ScriptOf(command));
+
+    [Theory]
+    [InlineData("vite", null, true)]
+    [InlineData("vite --host", null, true)]
+    [InlineData("vite preview", null, true)]
+    [InlineData("vite build", null, false)]
+    [InlineData("vitest run", null, false)]
+    [InlineData("tsc -b && vite build", null, false)]
+    [InlineData("next dev --turbo", null, true)]
+    [InlineData("next build", null, false)]
+    [InlineData("eslint .", "lint", false)]
+    [InlineData("node server.js", "start", true)] // unknown body, server-like script name
+    [InlineData("uv run uvicorn app:app --reload", null, true)]
+    [InlineData("python manage.py runserver", null, true)]
+    [InlineData("python manage.py migrate", null, false)]
+    public void Server_detection(string body, string? script, bool server) =>
+        Assert.Equal(server, CommandList.IsServerCommand(body, script));
+
+    [Fact]
+    public void Legacy_start_command_becomes_the_first_chip()
+    {
+        var def = new ProjectDefinition { StartCommand = "pnpm run dev" };
+        def.Commands.Add(new ProjectCommand { Name = "tunnel", Command = "cloudflared tunnel run" });
+        def.HiddenScripts.Add("lint");
+        Assert.True(CommandList.MigrateStartCommand(def, Scripts));
+        Assert.Null(def.StartCommand);
+        Assert.Equal("script:dev", def.DefaultCommand); // the old start command stays the default
+        // start first, then the visible scripts as the chip row showed them, then the custom commands.
+        Assert.Equal(["dev", "build", "tunnel"], CommandList.Resolve(def, Scripts).Select(c => c.Name));
+        Assert.False(CommandList.MigrateStartCommand(def, Scripts)); // only once
+
+        var py = new ProjectDefinition { StartCommand = "python app.py" };
+        CommandList.MigrateStartCommand(py, new Dictionary<string, string>());
+        var only = Assert.Single(CommandList.Resolve(py, new Dictionary<string, string>()));
+        Assert.Equal("start", only.Name);
+        Assert.Equal("cmd:start", py.DefaultCommand);
+        Assert.Equal("python app.py", only.ShellCommand);
+        Assert.True(only.IsServer); // the old start command keeps crash handling
+    }
+
+    [Fact]
+    public void Default_is_the_chosen_chip_else_the_first()
+    {
+        var def = new ProjectDefinition { PackageManager = "pnpm" };
+        var list = CommandList.Resolve(def, Scripts);
+        Assert.Equal("dev", CommandList.DefaultOf(def, list)!.Name); // none chosen: the first
+        def.DefaultCommand = "script:lint";
+        Assert.Equal("lint", CommandList.DefaultOf(def, list)!.Name); // anywhere in the order
+        def.DefaultCommand = "cmd:gone";
+        Assert.Equal("dev", CommandList.DefaultOf(def, list)!.Name); // removed: back to the first
+        Assert.Null(CommandList.DefaultOf(def, []));
+    }
+
+    [Fact]
+    public void Old_projects_json_is_migrated_on_load()
+    {
+        using var data = new TempDir();
+        using var proj = new TempDir().File("package.json", """{"scripts":{"build":"vite build","dev":"vite"}}""");
+        File.WriteAllText(System.IO.Path.Combine(data.Path, "projects.json"), $$"""
+            {"projects":[{"id":"p","name":"p","path":{{System.Text.Json.JsonSerializer.Serialize(proj.Path)}},"startCommand":"npm run dev",
+              "commands":[{"name":"x","command":"echo x"}]}],"groups":[]}
+            """);
+        var m = new ProjectManager(new AppPaths(data.Path));
+        m.Load();
+        Assert.Equal(["dev", "build", "x"], m.GetCommands("p").Select(c => c.Name));
+        Assert.DoesNotContain("startCommand", File.ReadAllText(System.IO.Path.Combine(data.Path, "projects.json")));
+        Assert.Contains("startCommand", File.ReadAllText(System.IO.Path.Combine(data.Path, "projects.json.before-commands.bak"))); // original kept
+    }
+}
+
 public class ProjectManagerTests
 {
+    /// <summary>Gives the project a single custom chip.</summary>
+    private static void SetCommand(ProjectManager m, ProjectRuntime r, string name, string command, bool autoRestart = false)
+    {
+        var def = r.Definition.Clone();
+        def.Commands = [new ProjectCommand { Name = name, Command = command }];
+        def.AutoRestart = autoRestart;
+        m.UpdateProject(def);
+    }
+
     [Fact]
     public void Add_detects_and_persists_without_pinning_a_port()
     {
@@ -215,14 +337,12 @@ public class ProjectManagerTests
         var m = new ProjectManager(new AppPaths(data.Path));
         m.Load();
         var r = m.AddProject(proj.Path);
-        var def = r.Definition.Clone();
-        def.StartCommand = "echo started& ping -n 30 127.0.0.1 >nul";
-        m.UpdateProject(def);
+        SetCommand(m, r, "work", "echo started& ping -n 30 127.0.0.1 >nul");
 
         await m.StartAsync(r.Id);
         Assert.True(r.IsActive);
         for (int i = 0; i < 50 && r.State != ProjectState.Running; i++) await Task.Delay(100);
-        Assert.Equal(ProjectState.Running, r.State); // no port: running after 2s alive
+        Assert.Equal(ProjectState.Running, r.State); // not a server: running after 2s alive
         await m.StopAsync(r.Id);
         Assert.Equal(ProjectState.Stopped, r.State);
         Assert.Contains(r.Log.Snapshot(), l => l.Text == "started");
@@ -237,48 +357,79 @@ public class ProjectManagerTests
         m.Load();
         var r = m.AddProject(proj.Path);
         var def = r.Definition.Clone();
-        def.StartCommand = "ping -n 30 127.0.0.1 >nul";
-        def.Commands.Add(new ProjectCommand { Name = "a", Command = "echo a-ran& ping -n 30 127.0.0.1 >nul" });
-        def.Commands.Add(new ProjectCommand { Name = "b", Command = "ping -n 30 127.0.0.1 >nul" });
+        def.Commands =
+        [
+            new ProjectCommand { Name = "main", Command = "ping -n 30 127.0.0.1 >nul" },
+            new ProjectCommand { Name = "a", Command = "echo a-ran& ping -n 30 127.0.0.1 >nul" },
+            new ProjectCommand { Name = "b", Command = "ping -n 30 127.0.0.1 >nul" },
+        ];
         m.UpdateProject(def);
-        var a = r.Definition.Commands[0];
-        var b = r.Definition.Commands[1];
-        string[] Running() => r.CommandRuns.Select(x => x.DisplayName).ToArray();
         int Ran() => r.Log.Snapshot().Count(l => l.Text == "a-ran");
         async Task WaitRan(int n) { for (int i = 0; i < 100 && Ran() < n; i++) await Task.Delay(20); }
 
+        // Start runs the first chip when none is chosen as the default…
         await m.StartAsync(r.Id);
         Assert.True(r.IsActive);
+        Assert.Equal("cmd:main", r.RunKey);
 
-        // Another command replaces the start command…
-        await m.RunCustomCommandAsync(r.Id, a);
-        Assert.False(r.IsActive);
-        Assert.Equal(ProjectState.Stopped, r.State);
-        Assert.Equal(["a"], Running());
+        // …and the chosen default otherwise, wherever it is in the order.
+        await m.StopAsync(r.Id);
+        m.SetDefaultCommand(r.Id, "cmd:b");
+        await m.StartAsync(r.Id);
+        Assert.Equal("cmd:b", r.RunKey);
+        await m.StopAsync(r.Id);
+        m.SetCommands(r.Id, r.Definition.Commands, defaultKey: null);
+        await m.StartAsync(r.Id);
+        Assert.Equal("cmd:main", r.RunKey);
+
+        // Another chip replaces it…
+        await m.RunAsync(r.Id, "cmd:a");
+        Assert.True(r.IsActive);
+        Assert.Equal("a", r.RunName);
+        Assert.Equal(-1, r.GetLastExit("cmd:main")); // stopped by the switch
         await WaitRan(1);
 
-        // …a third replaces that one…
-        await m.RunCustomCommandAsync(r.Id, b);
-        Assert.Equal(["b"], Running());
-
         // …running the same one again restarts it…
-        var first = r.CommandRuns[0].StartedAt;
-        await m.RunCustomCommandAsync(r.Id, b);
-        Assert.Equal(["b"], Running());
-        Assert.True(r.CommandRuns[0].StartedAt > first);
+        var first = r.StartedAt;
+        await m.RunAsync(r.Id, "cmd:a");
+        await WaitRan(2);
+        Assert.Equal("a", r.RunName);
+        Assert.True(r.StartedAt > first);
 
-        // …and the start command replaces it again.
+        // …start does nothing while something runs, restart runs the current one again.
         await m.StartAsync(r.Id);
-        Assert.True(r.IsActive);
-        Assert.Empty(Running());
+        Assert.Equal("a", r.RunName);
+        await m.RestartAsync(r.Id);
+        await WaitRan(3);
+        Assert.Equal("a", r.RunName);
 
         // Stop stops whichever it is.
-        await m.RunCustomCommandAsync(r.Id, a);
-        await WaitRan(2);
+        await m.RunAsync(r.Id, "cmd:b");
         await m.StopAsync(r.Id);
         Assert.False(r.IsActive);
-        Assert.Empty(Running());
-        Assert.Equal(2, Ran());
+        Assert.Equal(3, Ran());
+    }
+
+    [Fact]
+    public async Task A_failed_build_is_not_a_crash()
+    {
+        using var data = new TempDir();
+        using var proj = new TempDir();
+        var m = new ProjectManager(new AppPaths(data.Path));
+        m.Load();
+        var r = m.AddProject(proj.Path);
+        SetCommand(m, r, "lint", "exit /b 3", autoRestart: true);
+        int crashes = 0;
+        m.ProjectCrashed += (_, _) => Interlocked.Increment(ref crashes);
+
+        await m.StartAsync(r.Id);
+        for (int i = 0; i < 50 && r.IsActive; i++) await Task.Delay(50);
+        await Task.Delay(200);
+        Assert.Equal(ProjectState.Crashed, r.State);
+        Assert.Equal(3, r.GetLastExit("cmd:lint"));
+        Assert.False(r.IsServerRun);
+        Assert.Equal(0, crashes); // no toast…
+        Assert.Null(r.NextRestartAt); // …and no auto-restart
     }
 
     [Fact]
@@ -289,10 +440,7 @@ public class ProjectManagerTests
         var m = new ProjectManager(new AppPaths(data.Path));
         m.Load();
         var r = m.AddProject(proj.Path);
-        var def = r.Definition.Clone();
-        def.StartCommand = "exit /b 5";
-        def.AutoRestart = true;
-        m.UpdateProject(def);
+        SetCommand(m, r, "start", "exit /b 5", autoRestart: true); // "start": a server by convention
         int crashes = 0;
         m.ProjectCrashed += (_, code) => { Assert.Equal(5, code); Interlocked.Increment(ref crashes); };
 
@@ -318,11 +466,8 @@ public class ProjectManagerTests
         var m = new ProjectManager(new AppPaths(data.Path));
         m.Load();
         var r = m.AddProject(proj.Path);
-        var def = r.Definition.Clone();
         // Crashes after ~0.3 s every time, so restarts keep coming.
-        def.StartCommand = "ping -n 1 -w 300 10.255.255.1 >nul & exit /b 5";
-        def.AutoRestart = true;
-        m.UpdateProject(def);
+        SetCommand(m, r, "start", "ping -n 1 -w 300 10.255.255.1 >nul & exit /b 5", autoRestart: true);
 
         await m.StartAsync(r.Id);
         for (int i = 0; i < 100 && r.NextRestartAt is null; i++) await Task.Delay(20);

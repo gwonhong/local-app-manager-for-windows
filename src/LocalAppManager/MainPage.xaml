@@ -561,7 +561,15 @@
                                                 <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71A;" /></MenuFlyoutItem.Icon>
                                             </MenuFlyoutItem>
                                             <MenuFlyoutSeparator />
-                                            <MenuFlyoutItem Command="{x:Bind HideCommand}" IsEnabled="{x:Bind IsScript}" Text="숨기기" />
+                                            <MenuFlyoutItem Command="{x:Bind SetDefaultCommand}" IsEnabled="{x:Bind IsNotDefault}" Text="기본 명령으로 (▶가 실행)">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Command="{x:Bind RemoveCommand}" Text="목록에서 빼기">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE738;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Command="{x:Bind Owner.ManageCommandsCommand}" Text="명령 관리…">
+                                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8FD;" /></MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
                                         </MenuFlyout>
                                     </Grid.ContextFlyout>
 
@@ -577,7 +585,7 @@
                                             <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE768;" Visibility="{x:Bind local:Converters.Collapsed(IsRunning), Mode=OneWay}" />
                                             <FontIcon FontSize="10" Foreground="{ThemeResource StateRunningBrush}" Glyph="&#xE72C;" Visibility="{x:Bind IsRunning, Mode=OneWay}" />
                                             <TextBlock MaxWidth="240" FontSize="13" Text="{x:Bind Label}" TextTrimming="CharacterEllipsis" />
-                                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE735;" Visibility="{x:Bind IsStartScript}" />
+                                            <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE735;" Visibility="{x:Bind IsDefault}" />
                                             <FontIcon FontSize="10" Foreground="{ThemeResource StateRunningBrush}" Glyph="&#xE73E;" Visibility="{x:Bind Succeeded, Mode=OneWay}" />
                                             <FontIcon FontSize="10" Foreground="{ThemeResource StateCrashedBrush}" Glyph="&#xE711;" Visibility="{x:Bind Failed, Mode=OneWay}" />
                                         </StackPanel>
@@ -593,11 +601,15 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     </ScrollViewer>
-                    <Button Grid.Column="2" VerticalAlignment="Top" AutomationProperties.Name="명령 메뉴" Style="{StaticResource IconButtonStyle}" ToolTipService.ToolTip="명령 추가 · 숨긴 스크립트">
-                        <FontIcon FontSize="14" Glyph="&#xE710;" />
-                        <Button.Flyout>
-                            <MenuFlyout x:Name="ChipMenu" Opening="ChipMenu_Opening" Placement="BottomEdgeAlignedRight" />
-                        </Button.Flyout>
+                    <Button
+                        Grid.Column="2"
+                        VerticalAlignment="Top"
+                        AutomationProperties.AutomationId="ManageCommandsButton"
+                        AutomationProperties.Name="명령 관리"
+                        Command="{x:Bind ViewModel.SelectedProject.ManageCommandsCommand, Mode=OneWay}"
+                        Style="{StaticResource IconButtonStyle}"
+                        ToolTipService.ToolTip="명령 관리 (추가 · 삭제 · 순서)">
+                        <FontIcon FontSize="14" Glyph="&#xE8FD;" />
                     </Button>
                 </Grid>
 

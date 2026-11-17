@@ -60,9 +60,7 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     [ObservableProperty] public partial bool RestartRequired { get; private set; }
     [ObservableProperty] public partial string? RestartNote { get; private set; }
     [ObservableProperty] public partial string UptimeText { get; private set; } = "";
-    [ObservableProperty] public partial string StartCommandText { get; private set; } = "";
     [ObservableProperty] public partial bool AutoRestart { get; private set; }
-    [ObservableProperty] public partial bool HasRunningCommands { get; private set; }
 
     // Plain bools for visibility: x:Bind doesn't call functions with a null argument,
     // so "VisibleIf(Url)" would never collapse again once Url went back to null.
@@ -83,8 +81,6 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     /// <summary>package.json scripts and custom commands, as chips.</summary>
     public ObservableCollection<CommandChipViewModel> Chips { get; } = [];
 
-    /// <summary>Hidden package.json scripts (offered in the chip row's "…" menu).</summary>
-    public ObservableCollection<string> HiddenScripts { get; } = [];
 
     /// <summary>Re-evaluates theme-dependent bindings (state brushes are resolved in code).</summary>
     public void NotifyThemeChanged()
@@ -122,13 +118,14 @@ public sealed partial class ProjectItemViewModel : ObservableObject
             ProjectState.Stopped => "정지됨",
             ProjectState.Starting => "시작 중",
             ProjectState.Running => "실행 중",
-            ProjectState.Exited => "종료됨",
-            ProjectState.Crashed => $"크래시 ({ProjectRuntimeFormat.ExitCode(r.LastExitCode)})",
+            // A build or lint that ends is "done"/"failed"; only a server that dies is a crash.
+            ProjectState.Exited => r.IsServerRun ? "종료됨" : "완료",
+            ProjectState.Crashed => $"{(r.IsServerRun ? "크래시" : "실패")} ({ProjectRuntimeFormat.ExitCode(r.LastExitCode)})",
             _ => r.State.ToString(),
         };
 
         int? pinned = r.IsActive ? r.RunPort : def.Port;
-        bool usesPort = def.Port is not null && (def.PortMode != PortMode.None || def.StartCommand.Contains("{port}"));
+        bool usesPort = def.Port is not null && (def.PortMode != PortMode.None || def.Commands.Any(c => c.Command.Contains("{port}")));
         PortText = usesPort && pinned is int p ? $":{p}" : "";
         IsPortPinned = PortText.Length > 0;
         CanPinPort = fw.CanPinPort || def.Port is not null;
@@ -142,11 +139,8 @@ public sealed partial class ProjectItemViewModel : ObservableObject
         IsPortConflict = r.IsPortConflict;
         RestartRequired = r.RestartRequired;
         RestartNote = r.NextRestartAt is DateTime at ? $"{Math.Max(0, (int)Math.Ceiling((at - DateTime.Now).TotalSeconds))}초 후 자동 재시작" : null;
-        StartCommandText = def.StartCommand;
         AutoRestart = def.AutoRestart;
         UpdateUptime();
-
-        HasRunningCommands = r.CommandRuns.Count > 0;
         UpdateChips();
     }
 
@@ -171,56 +165,34 @@ public sealed partial class ProjectItemViewModel : ObservableObject
         IsPortLastSeen = IsPortIdle && pinned is null;
     }
 
-    /// <summary>
-    /// The start command's chip mirrors the project itself; every other chip mirrors its own run.
-    /// Only one of them runs at a time (see ProjectRuntime).
-    /// </summary>
+    /// <summary>Each chip mirrors the project's one run when it's the running one, else how it last ended.</summary>
     private void UpdateChips()
     {
         var r = Runtime;
-        var def = r.Definition;
-        var runs = r.CommandRuns.OrderBy(x => x.StartedAt).ToList();
-        var now = DateTime.Now;
         foreach (var chip in Chips)
-        {
-            if (chip.IsStartScript)
-            {
-                int? exit = r.State switch
-                {
-                    ProjectState.Crashed => r.LastExitCode ?? 1,
-                    ProjectState.Exited => 0,
-                    _ => null,
-                };
-                chip.Update(r.IsActive, exit);
-            }
-            else
-            {
-                chip.Update(runs.Any(x => x.Key == chip.Key), r.GetLastCommandExit(chip.Key));
-            }
-        }
+            chip.Update(r.IsActive && r.RunKey == chip.Key, r.GetLastExit(chip.Key));
 
-        // The run bar: what is running (one thing at a time), or else the last state.
-        var other = r.IsActive ? null : runs.FirstOrDefault();
-        IsRunningAny = r.IsActive || other is not null;
-        CanStop = IsRunningAny || r.NextRestartAt is not null;
-        DisplayState = other is not null ? ProjectState.Running : r.State;
-        RunLabel = r.IsActive ? StartLabel(def) : other?.DisplayName ?? "";
-        HasRunLabel = RunLabel.Length > 0;
-        RunStateText = other is not null ? "실행 중" : StateText;
-        RunCommandLine = r.IsActive ? def.StartCommand : other?.ShellCommand ?? "";
-        _runStartedAt = r.IsActive ? r.StartedAt : other?.StartedAt;
-        RunElapsed = _runStartedAt is DateTime t ? FormatElapsed(now - t) : "";
+        // The run bar: what is running (one thing at a time), or else how the last run ended.
+        IsRunningAny = r.IsActive;
+        CanStop = r.IsActive || r.NextRestartAt is not null;
+        DisplayState = r.State;
+        RunLabel = r.RunName ?? "";
+        HasRunLabel = RunLabel.Length > 0 && r.State != ProjectState.Stopped;
+        RunStateText = StateText;
+        RunCommandLine = r.RunShellCommand ?? "";
+        _runStartedAt = r.IsActive ? r.StartedAt : null;
+        RunElapsed = _runStartedAt is DateTime t ? FormatElapsed(DateTime.Now - t) : "";
     }
 
     private DateTime? _runStartedAt;
 
-    /// <summary>The start command or any other command is running.</summary>
+    /// <summary>A command is running.</summary>
     [ObservableProperty] public partial bool IsRunningAny { get; private set; }
 
     /// <summary>Something is running, or an automatic restart is pending (Stop cancels it).</summary>
     [ObservableProperty] public partial bool CanStop { get; private set; }
 
-    /// <summary>The project state for display: "running" also while another command than the start command runs.</summary>
+    /// <summary>The project state for display.</summary>
     [ObservableProperty] public partial ProjectState DisplayState { get; private set; }
 
     /// <summary>Name of what is running ("dev", "build"); empty when nothing is.</summary>
@@ -229,9 +201,6 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     [ObservableProperty] public partial string RunStateText { get; private set; } = "";
     [ObservableProperty] public partial string RunCommandLine { get; private set; } = "";
     [ObservableProperty] public partial string RunElapsed { get; private set; } = "";
-
-    /// <summary>What to call the start command: its script name ("dev"), else the command itself.</summary>
-    private static string StartLabel(ProjectDefinition def) => StartScriptName(def) ?? def.StartCommand;
 
     public void UpdateUptime()
     {
@@ -254,51 +223,22 @@ public sealed partial class ProjectItemViewModel : ObservableObject
         return t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes}:{t.Seconds:00}";
     }
 
-    /// <summary>Re-reads package.json scripts and custom commands into <see cref="Chips"/>.</summary>
+    /// <summary>Re-reads the chip list (custom order + package.json scripts) into <see cref="Chips"/>.</summary>
     public void RefreshScripts()
     {
-        var def = Runtime.Definition;
-        var chips = new List<CommandChipViewModel>();
-        var scripts = FrameworkDetector.ReadScripts(def.Path);
-        string? startScript = StartScriptName(def);
-        HiddenScripts.Clear();
-        foreach (var (name, body) in scripts)
-        {
-            if (def.HiddenScripts.Contains(name))
-            {
-                HiddenScripts.Add(name);
-                continue;
-            }
-            chips.Add(new CommandChipViewModel(this, ProjectManager.ScriptKey(name), name, body, isScript: true, isStartScript: name == startScript));
-        }
-        foreach (var cmd in def.Commands.Where(c => !string.IsNullOrWhiteSpace(c.Name)))
-            chips.Add(new CommandChipViewModel(this, ProjectManager.CommandKey(cmd.Name), cmd.Name, cmd.Command, isScript: false, isStartScript: false));
-
-        // Chips are the only way to start something here, so the start command always has one,
-        // even when it isn't a package.json script (python manage.py runserver …).
-        if (!chips.Any(c => c.IsStartScript) && !string.IsNullOrWhiteSpace(def.StartCommand))
-            chips.Insert(0, new CommandChipViewModel(this, "main", def.StartCommand, def.StartCommand, isScript: false, isStartScript: true));
-
+        var commands = _manager.GetCommands(Id);
+        string? defaultKey = CommandList.DefaultOf(Runtime.Definition, commands)?.Key;
         Chips.Clear();
-        foreach (var c in chips) Chips.Add(c);
+        foreach (var c in commands)
+            Chips.Add(new CommandChipViewModel(this, c, isDefault: c.Key == defaultKey));
         Refresh();
-    }
-
-    /// <summary>The script the start command runs ("pnpm run dev" → "dev"), so its chip can be marked.</summary>
-    private static string? StartScriptName(ProjectDefinition def)
-    {
-        var parts = def.StartCommand.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length >= 3 && parts[1] == "run") return parts[2];
-        if (parts.Length == 2 && parts[0] is "npm" or "pnpm" or "yarn" or "bun" && parts[1] is "start" or "dev") return parts[1];
-        if (parts.Length == 2 && parts[0] is "yarn" or "pnpm" or "bun") return parts[1];
-        return null;
     }
 
     // ---- requests the view handles (dialogs need a XamlRoot)
 
     public static event Action<ProjectItemViewModel>? EditRequested;
     public static event Action<ProjectItemViewModel>? RemoveRequested;
-    public static event Action<ProjectItemViewModel>? AddCommandRequested;
+    public static event Action<ProjectItemViewModel>? ManageCommandsRequested;
 
     [RelayCommand]
     private void Edit() => EditRequested?.Invoke(this);
@@ -307,7 +247,7 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     private void Remove() => RemoveRequested?.Invoke(this);
 
     [RelayCommand]
-    private void AddCustomCommand() => AddCommandRequested?.Invoke(this);
+    private void ManageCommands() => ManageCommandsRequested?.Invoke(this);
 
     // ---- commands (pure actions)
 
@@ -317,17 +257,14 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     [RelayCommand]
     private Task StopAsync() => _manager.StopAsync(Id);
 
-    /// <summary>Restarts whatever is running (the start command, or the other command that runs instead).</summary>
+    /// <summary>Runs the current (or last) command again.</summary>
     [RelayCommand]
-    private Task RestartAsync()
-    {
-        if (!Runtime.IsActive && Chips.FirstOrDefault(c => c.IsRunning && !c.IsStartScript) is { } chip) return RunChipAsync(chip);
-        return _manager.RestartAsync(Id);
-    }
+    private Task RestartAsync() => _manager.RestartAsync(Id);
 
+    /// <summary>The list's ▶/■: stops what runs, or runs the first chip.</summary>
     [RelayCommand]
     private Task ToggleAsync() =>
-        Runtime.IsActive || Runtime.CommandRuns.Count > 0 || Runtime.NextRestartAt is not null ? _manager.StopAsync(Id) : _manager.StartAsync(Id);
+        Runtime.IsActive || Runtime.NextRestartAt is not null ? _manager.StopAsync(Id) : _manager.StartAsync(Id);
 
     [RelayCommand]
     private async Task ReassignPortAndStartAsync()
@@ -356,45 +293,43 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     /// to it and pressing the running chip restarts it.
     /// </summary>
     [RelayCommand(AllowConcurrentExecutions = true)]
-    private Task RunChipAsync(CommandChipViewModel chip)
-    {
-        // The start command's chip is the project's own run: assigned port, state, auto-restart.
-        if (chip.IsStartScript) return Runtime.IsActive ? _manager.RestartAsync(Id) : _manager.StartAsync(Id);
-        if (chip.IsScript) return _manager.RunScriptAsync(Id, chip.Label);
-        if (Runtime.Definition.Commands.FirstOrDefault(c => c.Name == chip.Label) is { } cmd) return _manager.RunCustomCommandAsync(Id, cmd);
-        return Task.CompletedTask;
-    }
+    private Task RunChipAsync(CommandChipViewModel chip) => _manager.RunAsync(Id, chip.Key);
 
+    /// <summary>Takes a chip off the row (a script can be put back from the command panel).</summary>
     [RelayCommand]
-    private void HideScript(CommandChipViewModel chip)
+    private void RemoveChip(CommandChipViewModel chip)
     {
-        if (!chip.IsScript) return;
-        var def = Runtime.Definition.Clone();
-        if (!def.HiddenScripts.Contains(chip.Label)) def.HiddenScripts.Add(chip.Label);
-        _manager.UpdateProject(def);
+        var rest = _manager.GetCommands(Id).Where(c => c.Key != chip.Key).Select(ToDefinition).ToList();
+        // Removing the default chip leaves no default: the first chip takes over.
+        string? defaultKey = Runtime.Definition.DefaultCommand == chip.Key ? null : Runtime.Definition.DefaultCommand;
+        _manager.SetCommands(Id, rest, defaultKey);
         RefreshScripts();
     }
 
+    /// <summary>Makes this chip the default (what ▶, the tray and groups run).</summary>
     [RelayCommand]
-    private void ShowScript(string name)
+    private void SetDefaultChip(CommandChipViewModel chip)
     {
-        var def = Runtime.Definition.Clone();
-        def.HiddenScripts.Remove(name);
-        _manager.UpdateProject(def);
+        _manager.SetDefaultCommand(Id, chip.Key);
         RefreshScripts();
     }
+
+    /// <summary>A resolved chip back into what <see cref="ProjectDefinition.Commands"/> stores.</summary>
+    internal static ProjectCommand ToDefinition(ResolvedCommand c) =>
+        c.Script is { } s ? new ProjectCommand { Name = s, Script = s } : new ProjectCommand { Name = c.Name, Command = c.ShellCommand };
 }
 
 public sealed partial class CommandChipViewModel : ObservableObject
 {
-    public CommandChipViewModel(ProjectItemViewModel owner, string key, string label, string command, bool isScript, bool isStartScript)
+    public CommandChipViewModel(ProjectItemViewModel owner, ResolvedCommand command, bool isDefault)
     {
         Owner = owner;
-        Key = key;
-        Label = label;
-        CommandText = command;
-        IsScript = isScript;
-        IsStartScript = isStartScript;
+        Key = command.Key;
+        Label = command.Name;
+        // For a script, show what it really runs (its package.json body), not "pnpm run dev".
+        CommandText = command.Script is not null ? $"{command.ShellCommand}  →  {command.Body}" : command.ShellCommand;
+        IsScript = command.Script is not null;
+        IsDefault = isDefault;
     }
 
     public ProjectItemViewModel Owner { get; }
@@ -402,9 +337,14 @@ public sealed partial class CommandChipViewModel : ObservableObject
     public string Label { get; }
     public string CommandText { get; }
     public bool IsScript { get; }
-    public bool IsStartScript { get; }
+
+    /// <summary>The default chip (★): what the list's ▶, the tray and groups run.</summary>
+    public bool IsDefault { get; }
+    public bool IsNotDefault => !IsDefault;
+
     public string Tooltip =>
-        CommandText + (IsRunning ? "\n실행 중입니다. 다시 누르면 재시작합니다." : IsStartScript ? "\n기본 명령입니다. 목록의 ▶ 버튼과 트레이도 이 명령을 실행합니다." : "\n눌러서 실행");
+        CommandText + (IsRunning ? "\n실행 중입니다. 다시 누르면 재시작합니다." : "\n눌러서 실행")
+        + (IsDefault ? "\n★ 기본 명령: 목록의 ▶, 트레이, 그룹이 이 명령을 실행합니다." : "");
 
     [ObservableProperty] public partial bool IsRunning { get; private set; }
 
@@ -428,10 +368,13 @@ public sealed partial class CommandChipViewModel : ObservableObject
     private void Run() => Owner.RunChipCommand.Execute(this);
 
     [RelayCommand]
+    private void SetDefault() => Owner.SetDefaultChipCommand.Execute(this);
+
+    [RelayCommand]
     private void Stop() => Owner.StopCommand.Execute(null);
 
     [RelayCommand]
-    private void Hide() => Owner.HideScriptCommand.Execute(this);
+    private void Remove() => Owner.RemoveChipCommand.Execute(this);
 }
 
 internal static class ProjectRuntimeFormat

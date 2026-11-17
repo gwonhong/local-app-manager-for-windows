@@ -44,8 +44,8 @@ public sealed partial class MainPage : Page
             if (e.PropertyName == nameof(LogViewModel.AutoScroll) && vm.Log.AutoScroll) ScrollToEnd();
         };
 
-        ProjectItemViewModel.EditRequested += p => Ui.Forget(EditProjectAsync(p, focusCommands: false), "edit project");
-        ProjectItemViewModel.AddCommandRequested += p => Ui.Forget(EditProjectAsync(p, focusCommands: true), "add command");
+        ProjectItemViewModel.EditRequested += p => Ui.Forget(EditProjectAsync(p), "edit project");
+        ProjectItemViewModel.ManageCommandsRequested += p => Ui.Forget(ManageCommandsAsync(p), "manage commands");
         ProjectItemViewModel.RemoveRequested += p => Ui.Forget(RemoveProjectAsync(p), "remove project");
         GroupViewModel.EditRequested += g => Ui.Forget(EditGroupAsync(g), "edit group");
         GroupViewModel.RemoveRequested += g => vm.Manager.RemoveGroup(g.Id);
@@ -151,10 +151,27 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async Task EditProjectAsync(ProjectItemViewModel project, bool focusCommands)
+    private async Task ManageCommandsAsync(ProjectItemViewModel project)
     {
         if (_dialogOpen) return;
-        var dialog = new ProjectSettingsDialog(ViewModel.Manager, project.Runtime.Definition, focusCommands) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
+        var dialog = new CommandsDialog(ViewModel.Manager, project.Id) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
+        _dialogOpen = true;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || dialog.Result is null) return;
+            ViewModel.Manager.SetCommands(project.Id, dialog.Result, dialog.DefaultKey);
+            project.RefreshScripts();
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+    }
+
+    private async Task EditProjectAsync(ProjectItemViewModel project)
+    {
+        if (_dialogOpen) return;
+        var dialog = new ProjectSettingsDialog(ViewModel.Manager, project.Runtime.Definition) { XamlRoot = XamlRoot, RequestedTheme = ActualTheme };
         _dialogOpen = true;
         try
         {
@@ -277,34 +294,6 @@ public sealed partial class MainPage : Page
         {
             var id = ViewModel.Projects[i].Id;
             if (ViewModel.Manager.Projects.ToList().FindIndex(p => p.Id == id) != i) ViewModel.Manager.MoveProject(id, i);
-        }
-    }
-
-    // ------------------------------------------------------------------ chips
-
-    private void ChipMenu_Opening(object sender, object e)
-    {
-        ChipMenu.Items.Clear();
-        var p = ViewModel.SelectedProject;
-        if (p is null) return;
-        var add = new MenuFlyoutItem { Text = "명령 추가…", Icon = new FontIcon { Glyph = "" } };
-        add.Click += (_, _) => Ui.Forget(EditProjectAsync(p, focusCommands: true), "add command");
-        ChipMenu.Items.Add(add);
-        var reload = new MenuFlyoutItem { Text = "package.json 다시 읽기", Icon = new FontIcon { Glyph = "" } };
-        reload.Click += (_, _) => p.RefreshScripts();
-        ChipMenu.Items.Add(reload);
-        if (p.HiddenScripts.Count > 0)
-        {
-            ChipMenu.Items.Add(new MenuFlyoutSeparator());
-            var sub = new MenuFlyoutSubItem { Text = $"숨긴 스크립트 ({p.HiddenScripts.Count})" };
-            foreach (var name in p.HiddenScripts)
-            {
-                var item = new MenuFlyoutItem { Text = $"다시 표시: {name}" };
-                string n = name;
-                item.Click += (_, _) => p.ShowScriptCommand.Execute(n);
-                sub.Items.Add(item);
-            }
-            ChipMenu.Items.Add(sub);
         }
     }
 

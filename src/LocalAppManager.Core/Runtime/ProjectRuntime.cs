@@ -9,16 +9,14 @@ public enum ProjectState
     Stopped,
     Starting,
     Running,
-    /// <summary>The start command ended on its own with exit code 0.</summary>
+    /// <summary>The run ended on its own with exit code 0.</summary>
     Exited,
-    /// <summary>The start command ended on its own with a non-zero exit code.</summary>
+    /// <summary>The run ended on its own with a non-zero exit code.</summary>
     Crashed,
 }
 
-public sealed record CommandRunInfo(string Key, string DisplayName, string ShellCommand, bool IsRunning, int? LastExitCode, DateTime StartedAt);
-
 /// <summary>
-/// Live state of one project: the start command's process, its log, extra command runs,
+/// Live state of one project: the one command it runs at a time (any chip), its log, readiness and ports,
 /// and auto-restart. All public members are thread-safe; <see cref="Changed"/> is raised on
 /// whatever thread caused the change (the UI marshals it itself).
 /// </summary>
@@ -27,9 +25,11 @@ public sealed class ProjectRuntime
     private readonly object _gate = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly Func<IReadOnlyDictionary<string, string>> _baseEnvironment;
-    private readonly Dictionary<string, (ProcessSession Session, CommandRunInfo Info, TaskCompletionSource Done)> _commandRuns = new();
-    private readonly Dictionary<string, int> _lastCommandExit = new();
+    private readonly Dictionary<string, int> _lastExit = new();
     private ProcessSession? _session;
+    /// <summary>The command of the current (or last) run; auto-restart runs it again.</summary>
+    private ResolvedCommand? _command;
+    private bool _serverRun;
     private CancellationTokenSource? _readinessCts;
     private CancellationTokenSource? _restartCts;
     private int _restartAttempt;
@@ -99,7 +99,25 @@ public sealed class ProjectRuntime
         }
     }
 
-    /// <summary>Raised when the start command crashes (not when the user stops it).</summary>
+    /// <summary>Chip key of the current or last run ("script:dev"); null before the first run.</summary>
+    public string? RunKey { get; private set; }
+
+    /// <summary>Chip name of the current or last run ("dev", "build").</summary>
+    public string? RunName { get; private set; }
+
+    /// <summary>The command line of the current or last run, with the port applied.</summary>
+    public string? RunShellCommand { get; private set; }
+
+    /// <summary>The current or last run is a server (crash toast, auto-restart, waits for its port).</summary>
+    public bool IsServerRun { get { lock (_gate) return _serverRun; } }
+
+    /// <summary>How each chip's last run ended: 0 success, -1 stopped by the user, else the exit code.</summary>
+    public int? GetLastExit(string key)
+    {
+        lock (_gate) return _lastExit.TryGetValue(key, out var c) ? c : null;
+    }
+
+    /// <summary>Raised when a server run crashes (not when the user stops it, and not for a failed build or lint).</summary>
     public event Action<ProjectRuntime, int>? Crashed;
 
     /// <summary>The URL to open in a browser: the detected one, else localhost:port.</summary>
@@ -116,7 +134,7 @@ public sealed class ProjectRuntime
         }
     }
 
-    /// <summary>Every process currently in the start command's job (cmd, npm, node, …).</summary>
+    /// <summary>Every process currently in the run's job (cmd, npm, node, …).</summary>
     public IReadOnlyList<int> ProcessIds
     {
         get
@@ -127,24 +145,14 @@ public sealed class ProjectRuntime
         }
     }
 
-    public IReadOnlyList<CommandRunInfo> CommandRuns
-    {
-        get { lock (_gate) return _commandRuns.Values.Select(v => v.Info).ToList(); }
-    }
-
-    public int? GetLastCommandExit(string key)
-    {
-        lock (_gate) return _lastCommandExit.TryGetValue(key, out var c) ? c : null;
-    }
-
     // ------------------------------------------------------------------ start / stop
 
     /// <summary>Bumped by every stop; an auto-restart scheduled before a stop must not start afterwards.</summary>
     private int _stopGeneration;
 
-    internal Task StartAsync() => StartAsync(isAutoRestart: false, stopGeneration: -1);
+    private Task StartAsync(ResolvedCommand command) => StartAsync(command, isAutoRestart: false, stopGeneration: -1);
 
-    private async Task StartAsync(bool isAutoRestart, int stopGeneration)
+    private async Task StartAsync(ResolvedCommand command, bool isAutoRestart, int stopGeneration)
     {
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
@@ -154,19 +162,17 @@ public sealed class ProjectRuntime
             if (_session is not null) return;
 
             var def = Definition;
-            if (string.IsNullOrWhiteSpace(def.StartCommand))
-            {
-                SetError("시작 명령이 비어 있습니다. 프로젝트 설정에서 시작 명령을 입력하세요.", conflict: false);
-                return;
-            }
             if (!Directory.Exists(def.Path))
             {
                 SetError($"프로젝트 폴더가 없습니다: {def.Path}", conflict: false);
                 return;
             }
 
-            // Port check right before launching.
-            if (def.Port is int port && UsesPort(def) && !PortProbe.IsFree(port))
+            bool isServer = command.IsServer;
+            var built = CommandBuilder.Build(def, command.ShellCommand, isServer, _baseEnvironment());
+
+            // Port check right before launching, when the pinned port is actually handed to a server.
+            if (built.PortPassed && def.Port is int port && !PortProbe.IsFree(port))
             {
                 var owners = PortProbe.FindOwners(port);
                 string who = owners.Count > 0
@@ -177,7 +183,6 @@ public sealed class ProjectRuntime
                 return;
             }
 
-            var built = CommandBuilder.BuildStart(def, _baseEnvironment());
             ProcessSession session;
             try
             {
@@ -196,7 +201,12 @@ public sealed class ProjectRuntime
                 State = ProjectState.Starting;
                 StartedAt = session.StartedAt;
                 ProcessId = session.ProcessId;
-                RunPort = UsesPort(def) ? def.Port : null;
+                RunPort = built.PortPassed ? def.Port : null;
+                _command = command;
+                _serverRun = isServer || RunPort is not null;
+                RunKey = command.Key;
+                RunName = command.Name;
+                RunShellCommand = built.ShellCommand;
                 DetectedUrl = null;
                 ListeningPorts = [];
                 LastError = null;
@@ -210,9 +220,8 @@ public sealed class ProjectRuntime
 
             session.UrlDetected += OnUrlDetected;
             _readinessCts = new CancellationTokenSource();
-            // A known dev server isn't "running" until it listens; anything else is once it has stayed up briefly.
-            bool expectServer = RunPort is not null || FrameworkDetector.ById(def.Framework).CanPinPort;
-            _ = MonitorAsync(session, expectServer, _readinessCts.Token);
+            // A server isn't "running" until it listens; anything else is once it has stayed up briefly.
+            _ = MonitorAsync(session, _serverRun, _readinessCts.Token);
             _ = WaitForExitAsync(session);
             RaiseChanged();
         }
@@ -252,49 +261,29 @@ public sealed class ProjectRuntime
 
     // ------------------------------------------------------------------ one run at a time
     //
-    // A project runs one thing at a time: the start command or one other command. Starting anything
-    // first stops whatever is running ("switching"). A stop the user asks for while a switch is still
-    // stopping the old run wins: the new command isn't started.
+    // A project runs one command at a time (any chip). Running a command first stops whatever is running
+    // ("switching"); running the one that already runs restarts it. A stop the user asks for while a switch
+    // is still stopping the old run wins: the new command isn't started.
 
     private readonly SemaphoreSlim _switch = new(1, 1);
     private int _userStops;
 
-    /// <summary>Stops the start command and every other command.</summary>
+    /// <summary>Stops whatever runs and cancels a pending auto-restart.</summary>
     internal Task StopEverythingAsync()
     {
         Interlocked.Increment(ref _userStops);
-        return StopAllCoreAsync();
+        return StopAsync();
     }
 
-    private Task StopAllCoreAsync() => Task.WhenAll(StopAsync(), StopCommandsAsync());
-
-    private async Task StopCommandsAsync()
-    {
-        List<(ProcessSession Session, Task Done)> runs;
-        lock (_gate) runs = _commandRuns.Values.Select(v => (v.Session, (Task)v.Done.Task)).ToList();
-        await Task.WhenAll(runs.Select(async run =>
-        {
-            try
-            {
-                await run.Session.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
-            }
-            catch (ObjectDisposedException)
-            {
-                // It finished on its own in the meantime.
-            }
-            await run.Done.ConfigureAwait(false);
-        })).ConfigureAwait(false);
-    }
-
-    private async Task SwitchAsync(Func<Task> start)
+    private async Task SwitchAsync(ResolvedCommand command)
     {
         int stops = Volatile.Read(ref _userStops);
         await _switch.WaitAsync().ConfigureAwait(false);
         try
         {
-            await StopAllCoreAsync().ConfigureAwait(false);
+            await StopAsync().ConfigureAwait(false);
             if (stops != Volatile.Read(ref _userStops)) return;
-            await start().ConfigureAwait(false);
+            await StartAsync(command).ConfigureAwait(false);
         }
         finally
         {
@@ -302,35 +291,24 @@ public sealed class ProjectRuntime
         }
     }
 
-    /// <summary>Starts the start command, stopping any other command first. Does nothing if it already runs.</summary>
-    internal Task StartExclusiveAsync()
-    {
-        bool commandsRunning;
-        lock (_gate) commandsRunning = _commandRuns.Count > 0;
-        return IsActive && !commandsRunning ? Task.CompletedTask : commandsRunning ? SwitchAsync(StartAsync) : StartAsync();
-    }
-
-    /// <summary>Stops whatever runs and starts the start command.</summary>
-    internal Task RestartAsync() => SwitchAsync(StartAsync);
+    /// <summary>Runs <paramref name="command"/> unless something already runs (then nothing happens).</summary>
+    internal Task StartIfIdleAsync(ResolvedCommand command) => IsActive ? Task.CompletedTask : SwitchAsync(command);
 
     /// <summary>Stops whatever runs (including an earlier run of the same command) and runs this command.</summary>
-    internal Task RunCommandExclusiveAsync(string key, string displayName, string command) =>
-        SwitchAsync(() =>
-        {
-            RunCommand(key, displayName, command);
-            return Task.CompletedTask;
-        });
+    internal Task RunAsync(ResolvedCommand command) => SwitchAsync(command);
+
+    /// <summary>The command of the current or last run, so restart can run it again.</summary>
+    internal ResolvedCommand? LastCommand
+    {
+        get { lock (_gate) return _command; }
+    }
 
     /// <summary>Kills everything immediately (app shutdown). Doesn't wait.</summary>
     internal void KillAll()
     {
         Interlocked.Increment(ref _stopGeneration);
         CancelPendingRestart(resetAttempts: true);
-        lock (_gate)
-        {
-            _session?.Kill();
-            foreach (var run in _commandRuns.Values) run.Session.Kill();
-        }
+        lock (_gate) _session?.Kill();
     }
 
     public void SendInput(string text)
@@ -350,6 +328,7 @@ public sealed class ProjectRuntime
         session.Dispose();
 
         ProjectState newState = userStop ? ProjectState.Stopped : code == 0 ? ProjectState.Exited : ProjectState.Crashed;
+        bool server;
         lock (_gate)
         {
             if (!ReferenceEquals(_session, session)) return;
@@ -357,7 +336,11 @@ public sealed class ProjectRuntime
             State = newState;
             LastExitCode = userStop ? null : code;
             ProcessId = null;
+            // A run that listened on a port was a server even if we didn't recognize its command.
+            if (ListeningPorts.Count > 0) _serverRun = true;
+            server = _serverRun;
             ListeningPorts = [];
+            if (RunKey is { } key) _lastExit[key] = userStop ? -1 : code;
         }
 
         switch (newState)
@@ -366,10 +349,12 @@ public sealed class ProjectRuntime
                 Log.System("■ 정지했습니다.");
                 break;
             case ProjectState.Exited:
-                Log.System("■ 종료했습니다 (코드 0).");
+                Log.System(server ? "■ 종료했습니다 (코드 0)." : $"✔ 완료 ({FormatDuration(uptime)})");
                 break;
             default:
-                Log.Error($"✖ 비정상 종료했습니다 (코드 {FormatExitCode(code)}, 실행 시간 {FormatDuration(uptime)}).");
+                Log.Error(server
+                    ? $"✖ 비정상 종료했습니다 (코드 {FormatExitCode(code)}, 실행 시간 {FormatDuration(uptime)})."
+                    : $"✖ 실패 (코드 {FormatExitCode(code)}, {FormatDuration(uptime)})");
                 break;
         }
 
@@ -379,7 +364,8 @@ public sealed class ProjectRuntime
             lock (_gate) LastError = hint;
         }
 
-        if (newState == ProjectState.Crashed)
+        // A failed build or lint is just a result; only a server that dies is a crash worth a toast or a restart.
+        if (newState == ProjectState.Crashed && server)
         {
             // A run that stayed up for a while counts as healthy: start the backoff over.
             if (uptime > TimeSpan.FromMinutes(1)) _restartAttempt = 0;
@@ -398,7 +384,7 @@ public sealed class ProjectRuntime
             var m = System.Text.RegularExpressions.Regex.Match(line.Text, @"^'(?<cmd>[^']+)'(?:은\(는\) 내부 또는 외부 명령| is not recognized as an internal or external command)");
             if (!m.Success) continue;
             string cmd = m.Groups["cmd"].Value;
-            string alt = cmd is "npm" or "npx" ? " pnpm/yarn을 쓰는 프로젝트라면 시작 명령을 바꾸고," : "";
+            string alt = cmd is "npm" or "npx" ? " pnpm/yarn을 쓰는 프로젝트라면 명령을 바꾸고," : "";
             return $"'{cmd}' 명령을 찾지 못했습니다.{alt} 설치 여부와 PATH를 확인하세요. (PATH는 실행할 때마다 레지스트리에서 다시 읽습니다)";
         }
         return null;
@@ -545,8 +531,13 @@ public sealed class ProjectRuntime
             try
             {
                 await Task.Delay(delay, cts.Token).ConfigureAwait(false);
-                lock (_gate) NextRestartAt = null;
-                await StartAsync(isAutoRestart: true, stopGeneration: generation).ConfigureAwait(false);
+                ResolvedCommand? command;
+                lock (_gate)
+                {
+                    NextRestartAt = null;
+                    command = _command;
+                }
+                if (command is not null) await StartAsync(command, isAutoRestart: true, stopGeneration: generation).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -568,69 +559,17 @@ public sealed class ProjectRuntime
         if (had) RaiseChanged();
     }
 
-    // ------------------------------------------------------------------ extra commands
-
-    /// <summary>Runs a script/command next to the start command. Key identifies it (one run per key at a time).</summary>
-    internal void RunCommand(string key, string displayName, string command)
-    {
-        var def = Definition;
-        lock (_gate)
-            if (_commandRuns.ContainsKey(key)) return;
-
-        var built = CommandBuilder.BuildOther(def, command, _baseEnvironment());
-        ProcessSession session;
-        try
-        {
-            session = ProcessSession.Start(built.CommandLine, built.ShellCommand, def.Path, built.Environment, Log, source: displayName);
-        }
-        catch (Exception e)
-        {
-            Log.Error($"[{displayName}] 실행 실패: {e.Message}", displayName);
-            return;
-        }
-        var info = new CommandRunInfo(key, displayName, built.ShellCommand, true, null, session.StartedAt);
-        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_gate) _commandRuns[key] = (session, info, done);
-        Log.System($"▶ {built.ShellCommand}", displayName);
-        RaiseChanged();
-
-        _ = Task.Run(async () =>
-        {
-            int code = await session.Completion.ConfigureAwait(false);
-            bool stopped = session.StopRequested;
-            var elapsed = DateTime.Now - session.StartedAt;
-            session.Dispose();
-            lock (_gate)
-            {
-                _commandRuns.Remove(key);
-                _lastCommandExit[key] = stopped ? -1 : code;
-            }
-            if (stopped) Log.System("■ 중지했습니다.", displayName);
-            else if (code == 0) Log.System($"✔ 완료 ({FormatDuration(elapsed)})", displayName);
-            else Log.Error($"✖ 실패 (코드 {FormatExitCode(code)}, {FormatDuration(elapsed)})", displayName);
-            done.TrySetResult();
-            RaiseChanged();
-        });
-    }
-
-    internal void StopCommand(string key)
-    {
-        ProcessSession? session;
-        lock (_gate) session = _commandRuns.TryGetValue(key, out var run) ? run.Session : null;
-        if (session is not null) _ = session.StopGracefullyAsync(GracefulStopTimeout);
-    }
-
-    public bool IsCommandRunning(string key)
-    {
-        lock (_gate) return _commandRuns.ContainsKey(key);
-    }
-
     // ------------------------------------------------------------------ misc
 
     internal void OnDefinitionChanged(ProjectDefinition old, ProjectDefinition updated)
     {
         Definition = updated;
-        bool needsRestart = IsActive && (old.StartCommand != updated.StartCommand || old.Port != updated.Port || old.PortMode != updated.PortMode
+        // The running custom command was edited (a script's body lives in package.json, not here).
+        string? runningName = RunKey is { } k && k.StartsWith("cmd:", StringComparison.Ordinal) ? k[4..] : null;
+        bool commandChanged = runningName is not null
+            && old.Commands.FirstOrDefault(c => c.Script is null && c.Name.Trim() == runningName)?.Command
+            != updated.Commands.FirstOrDefault(c => c.Script is null && c.Name.Trim() == runningName)?.Command;
+        bool needsRestart = IsActive && (commandChanged || old.Port != updated.Port || old.PortMode != updated.PortMode
             || old.PortArgs != updated.PortArgs || old.PortEnvVar != updated.PortEnvVar || old.Path != updated.Path
             || !old.Environment.OrderBy(k => k.Key).SequenceEqual(updated.Environment.OrderBy(k => k.Key)));
         lock (_gate)
@@ -666,9 +605,6 @@ public sealed class ProjectRuntime
         }
         RaiseChanged();
     }
-
-    internal static bool UsesPort(ProjectDefinition def) =>
-        def.Port is not null && (def.PortMode != PortMode.None || def.StartCommand.Contains("{port}", StringComparison.Ordinal));
 
     private void RaiseChanged() => Changed?.Invoke(this);
 

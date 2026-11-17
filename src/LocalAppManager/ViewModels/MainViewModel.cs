@@ -81,7 +81,7 @@ public sealed partial class MainViewModel : ObservableObject
         _clock.Tick += (_, _) =>
         {
             foreach (var p in Projects)
-                if (p.IsActive || p.HasRunningCommands || p.RestartNote is not null) p.UpdateUptime();
+                if (p.IsActive || p.RestartNote is not null) p.UpdateUptime();
         };
         _clock.Start();
 

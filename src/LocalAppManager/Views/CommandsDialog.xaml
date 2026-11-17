@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="LocalAppManager.Views.CommandsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:LocalAppManager.Views"
+    Title="명령 관리"
+    CloseButtonText="취소"
+    DefaultButton="Primary"
+    PrimaryButtonText="저장">
+
+    <StackPanel MinWidth="620" Spacing="10">
+        <TextBlock Style="{StaticResource CaptionSecondaryStyle}" TextWrapping="Wrap">
+            <Run Text="끌어서 순서를 바꿉니다. ★를 누르면 기본 명령이 됩니다(목록의 ▶, 트레이, 그룹이 실행)." />
+            <LineBreak />
+            <Run Text="명령에 {port}를 쓰면 고정 포트가 들어갑니다. cmd.exe로 실행하므로 &amp;&amp;, %VAR%도 쓸 수 있습니다." />
+        </TextBlock>
+
+        <ListView
+            x:Name="List"
+            MaxHeight="380"
+            AllowDrop="True"
+            AutomationProperties.AutomationId="CommandList"
+            AutomationProperties.Name="명령 목록"
+            CanDragItems="True"
+            CanReorderItems="True"
+            ItemsSource="{x:Bind Rows}"
+            SelectionMode="None">
+            <ListView.ItemContainerStyle>
+                <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="ListViewItem">
+                    <Setter Property="Padding" Value="4,0,4,0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:CommandRow">
+                    <Grid Padding="0,5" AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" Background="Transparent" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Drag handle (the whole row drags; the text boxes keep their own pointer input). -->
+                        <FontIcon VerticalAlignment="Center" FontSize="14" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE76F;" ToolTipService.ToolTip="끌어서 순서 바꾸기" />
+
+                        <!-- ★ = the default command (what ▶ runs). Press an empty star to make that row the default. -->
+                        <Button
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="{x:Bind DefaultLabel, Mode=OneWay}"
+                            Click="Default_Click"
+                            Style="{StaticResource IconButtonStyle}"
+                            Tag="{x:Bind}"
+                            ToolTipService.ToolTip="{x:Bind DefaultLabel, Mode=OneWay}">
+                            <Grid>
+                                <FontIcon FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE735;" Visibility="{x:Bind IsDefault, Mode=OneWay}" />
+                                <FontIcon FontSize="14" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE734;" Visibility="{x:Bind IsNotDefault, Mode=OneWay}" />
+                            </Grid>
+                        </Button>
+
+                        <!-- package.json script: name and body come from package.json. -->
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Visibility="{x:Bind IsScript}">
+                            <TextBlock FontFamily="{StaticResource LogFontFamily}" Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="package.json" />
+                        </StackPanel>
+                        <TextBlock
+                            Grid.Column="3"
+                            VerticalAlignment="Center"
+                            FontFamily="{StaticResource LogFontFamily}"
+                            FontSize="12.5"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind Detail}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{x:Bind Detail}"
+                            Visibility="{x:Bind IsScript}" />
+
+                        <!-- Custom command: editable. -->
+                        <TextBox
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="이름"
+                            FontFamily="{StaticResource LogFontFamily}"
+                            PlaceholderText="이름"
+                            Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            Visibility="{x:Bind IsCustom}" />
+                        <TextBox
+                            Grid.Column="3"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="명령"
+                            FontFamily="{StaticResource LogFontFamily}"
+                            PlaceholderText="예: python manage.py runserver {port}"
+                            Text="{x:Bind Command, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            Visibility="{x:Bind IsCustom}" />
+
+                        <Button
+                            Grid.Column="4"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="목록에서 빼기"
+                            Click="Remove_Click"
+                            Style="{StaticResource IconButtonStyle}"
+                            Tag="{x:Bind}"
+                            ToolTipService.ToolTip="목록에서 빼기">
+                            <FontIcon FontSize="13" Glyph="&#xE74D;" />
+                        </Button>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBlock
+            x:Name="EmptyNote"
+            Margin="4,0"
+            Style="{StaticResource CaptionSecondaryStyle}"
+            Text="명령이 없습니다. 아래에서 추가하세요."
+            Visibility="Collapsed" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button AutomationProperties.AutomationId="AddCommandButton" Click="AddCustom_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="12" Glyph="&#xE710;" />
+                    <TextBlock Text="명령 추가" />
+                </StackPanel>
+            </Button>
+            <DropDownButton x:Name="AddScriptButton" AutomationProperties.AutomationId="AddScriptButton">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="12" Glyph="&#xE8A5;" />
+                    <TextBlock Text="package.json 스크립트" />
+                </StackPanel>
+                <DropDownButton.Flyout>
+                    <MenuFlyout x:Name="ScriptMenu" Opening="ScriptMenu_Opening" Placement="BottomEdgeAlignedLeft" />
+                </DropDownButton.Flyout>
+            </DropDownButton>
+        </StackPanel>
+
+        <TextBlock x:Name="ErrorText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
+    </StackPanel>
+</ContentDialog>
