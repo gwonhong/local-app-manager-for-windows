@@ -21,6 +21,7 @@ public partial class App : Application
 
     public ProjectManager Manager { get; }
     public NotificationService Notifications { get; } = new();
+    public UpdateService Updates { get; } = new();
     public MainViewModel ViewModel { get; private set; } = null!;
     public MainWindow? Window => _window;
 
@@ -94,6 +95,24 @@ public partial class App : Application
         }
         AppLog.Info($"launched (background={Program.StartInBackground})");
         foreach (var folder in Program.FoldersToAdd) _window.Page.AddFolder(folder);
+
+        if (Updates.IsSupported) Ui.Forget(CheckForUpdateInBackgroundAsync(), "background update check");
+    }
+
+    /// <summary>Downloads a newer release quietly after startup; it is installed the next time the app quits.</summary>
+    private async Task CheckForUpdateInBackgroundAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(10));
+        try
+        {
+            if (await Updates.CheckAndDownloadAsync() is { } version)
+                Ui.Run(() => Notifications.ShowUpdateReady(version));
+        }
+        catch (Exception e)
+        {
+            // Offline, GitHub rate limit, …: try again next launch.
+            AppLog.Warn("background update check failed", e);
+        }
     }
 
     private void OnRedirected(AppActivationArguments e)
@@ -126,6 +145,11 @@ public partial class App : Application
             Ui.Forget(Manager.StartAsync(projectId), "restart from toast");
             return;
         }
+        if (action == "update")
+        {
+            Quit(restart: true);
+            return;
+        }
         ShowWindow();
         if (projectId is not null && ViewModel.Find(projectId) is { } vm) ViewModel.SelectedProject = vm;
     }
@@ -144,11 +168,12 @@ public partial class App : Application
     /// Quits for real: stops every project (Ctrl+C, then kill after a few seconds), saves window
     /// placement, removes the tray icon. Even if this is skipped, the job objects kill all trees.
     /// </summary>
-    public async void Quit()
+    /// <param name="restart">Start again after quitting (used to finish an update right away).</param>
+    public async void Quit(bool restart = false)
     {
         if (_exiting) return;
         _exiting = true;
-        AppLog.Info("quitting");
+        AppLog.Info($"quitting (restart={restart})");
         try
         {
             _window?.SavePlacement();
@@ -162,6 +187,8 @@ public partial class App : Application
         {
             AppLog.Error("error while quitting", e);
         }
+        // A downloaded update is swapped in once this process is gone; projects are already stopped.
+        Updates.ApplyOnExit(restart);
         _window?.CloseForReal();
         Exit();
     }

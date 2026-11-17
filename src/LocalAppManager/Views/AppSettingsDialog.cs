@@ -87,8 +87,63 @@ public sealed partial class AppSettingsDialog : ContentDialog
         links.Children.Add(openLog);
         panel.Children.Add(links);
         panel.Children.Add(new TextBlock { Text = manager.Paths.DataDir, Style = caption, IsTextSelectionEnabled = true });
+        panel.Children.Add(BuildUpdateSection(caption));
 
         Content = new ScrollViewer { Content = panel, MaxHeight = 640 };
+    }
+
+    /// <summary>Version line plus "check for updates" / "restart to update" (installed copies only).</summary>
+    private UIElement BuildUpdateSection(Style caption)
+    {
+        var updates = App.Current.Updates;
+        var section = new StackPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+        section.Children.Add(new TextBlock { Text = $"버전 {updates.CurrentVersion}", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
+        if (!updates.IsSupported)
+        {
+            section.Children.Add(new TextBlock { Text = "직접 빌드한 실행 파일은 자동 업데이트를 하지 않습니다.", Style = caption, TextWrapping = TextWrapping.Wrap });
+            return section;
+        }
+
+        var status = new TextBlock { Style = caption, TextWrapping = TextWrapping.Wrap };
+        var check = new Button { Content = "업데이트 확인" };
+        var restart = new Button { Content = "재시작해서 업데이트", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        void ShowReady(string version)
+        {
+            status.Text = $"새 버전 {version}을 받아 두었습니다. 앱을 종료하면 설치되고, 지금 재시작하면 실행 중인 프로젝트가 모두 정지됩니다.";
+            check.Visibility = Visibility.Collapsed;
+            restart.Visibility = Visibility.Visible;
+        }
+        restart.Visibility = Visibility.Collapsed;
+        if (updates.ReadyVersion is { } ready) ShowReady(ready);
+
+        check.Click += async (_, _) =>
+        {
+            check.IsEnabled = false;
+            status.Text = "확인하는 중…";
+            try
+            {
+                if (await updates.CheckAndDownloadAsync() is { } version) ShowReady(version);
+                else status.Text = "최신 버전입니다.";
+            }
+            catch (Exception e)
+            {
+                AppLog.Warn("update check failed", e);
+                status.Text = $"업데이트를 확인하지 못했습니다: {e.Message}";
+            }
+            check.IsEnabled = true;
+        };
+        restart.Click += (_, _) =>
+        {
+            Hide();
+            App.Current.Quit(restart: true);
+        };
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttons.Children.Add(check);
+        buttons.Children.Add(restart);
+        section.Children.Add(buttons);
+        section.Children.Add(status);
+        return section;
     }
 
     public void Apply()

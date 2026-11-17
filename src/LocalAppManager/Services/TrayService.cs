@@ -98,7 +98,7 @@ public sealed class TrayService : IDisposable
 
         items.Add(new MenuFlyoutSeparator());
         items.Add(new MenuFlyoutItem { Text = "모두 정지", IsEnabled = active > 0, Command = new AsyncRelayCommand(_app.Manager.StopAllAsync) });
-        items.Add(new MenuFlyoutItem { Text = "종료", Command = new RelayCommand(_app.Quit) });
+        items.Add(new MenuFlyoutItem { Text = "종료", Command = new RelayCommand(() => _app.Quit()) });
     }
 
     public void Dispose()

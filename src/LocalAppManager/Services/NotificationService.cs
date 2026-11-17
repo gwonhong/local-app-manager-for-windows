@@ -60,6 +60,27 @@ public sealed class NotificationService
         }
     }
 
+    public void ShowUpdateReady(string version)
+    {
+        if (!_registered) return;
+        try
+        {
+            var notification = new AppNotificationBuilder()
+                .AddArgument("action", "show")
+                .AddText($"새 버전 {version} 준비됨")
+                .AddText("앱을 종료하면 설치됩니다. 지금 재시작하면 실행 중인 프로젝트가 모두 정지됩니다.")
+                .AddButton(new AppNotificationButton("지금 재시작").AddArgument("action", "update"))
+                .BuildNotification();
+            notification.Tag = "update";
+            notification.Group = "update";
+            AppNotificationManager.Default.Show(notification);
+        }
+        catch (Exception e)
+        {
+            AppLog.Warn("failed to show toast", e);
+        }
+    }
+
     public void ShowInfo(string title, string text)
     {
         if (!_registered) return;

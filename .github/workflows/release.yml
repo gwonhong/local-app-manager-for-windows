@@ -1,4 +1,6 @@
-# Builds and publishes a GitHub Release when a version tag is pushed.
+# Builds and publishes a GitHub Release when a version tag is pushed. Per architecture it uploads a
+# Velopack Setup.exe, a portable zip, and the update feed (full/delta nupkg + releases.<rid>.json)
+# that installed copies update from. scripts/build-installer.ps1 does the actual build.
 #
 #   git tag v0.2.0
 #   git push origin v0.2.0
@@ -48,26 +50,33 @@ jobs:
         if: matrix.platform == 'x64'
         run: dotnet test tests/LocalAppManager.Core.Tests/LocalAppManager.Core.Tests.csproj -c Release
 
-      - name: Publish
-        run: >
-          dotnet publish src/LocalAppManager/LocalAppManager.csproj
-          -c Release
-          -p:Platform=${{ matrix.platform }}
-          -p:PublishProfile=${{ matrix.rid }}
-          -p:Version=${{ steps.version.outputs.version }}
-          -o out/LocalAppManager
-
-      - name: Zip
+      # Earlier packages of this channel, so vpk can also build a delta update. There is nothing to
+      # fetch before the first Velopack release, hence continue-on-error.
+      - name: Download previous release
+        continue-on-error: true
         shell: pwsh
         run: |
-          $zip = "LocalAppManager-${{ steps.version.outputs.version }}-${{ matrix.rid }}.zip"
-          Compress-Archive -Path out/LocalAppManager -DestinationPath $zip
-          "ZIP=$zip" >> $env:GITHUB_ENV
+          dotnet tool restore
+          dotnet vpk download github `
+            --repoUrl https://github.com/${{ github.repository }} `
+            --token ${{ github.token }} `
+            --channel ${{ matrix.rid }} `
+            --outputDir previous ${{ contains(github.ref_name, '-') && '--pre' || '' }}
+
+      # Same script as a local build: publish, then vpk pack.
+      - name: Build installer
+        shell: pwsh
+        run: >
+          ./scripts/build-installer.ps1
+          -Platform ${{ matrix.platform }}
+          -Version ${{ steps.version.outputs.version }}
+          -OutputDir dist
+          -PreviousReleasesDir previous
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.rid }}
-          path: ${{ env.ZIP }}
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -80,18 +89,18 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Re-pushing a moved tag rebuilds it: an existing release keeps its notes and gets its zips replaced.
+      # Re-pushing a moved tag rebuilds it: an existing release keeps its notes and gets its files replaced.
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/*.zip --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
             exit 0
           fi
           prerelease=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+          gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \

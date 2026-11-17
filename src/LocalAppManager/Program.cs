@@ -71,6 +71,17 @@ public static partial class Program
         if (args.Length == 2 && args[0] == "--send-ctrl-c" && int.TryParse(args[1], out int targetPid))
             return LocalAppManager.Core.Processes.ChildProcess.SendCtrlCFromHelper(targetPid);
 
+        // Velopack runs the exe with its own arguments while installing, updating and uninstalling;
+        // Run() handles those and exits. A normal launch returns here right away (also applies an
+        // update that was downloaded but not applied, e.g. after a crash).
+        Velopack.VelopackApp.Build()
+            .OnBeforeUninstallFastCallback(_ =>
+            {
+                // Uninstall leaves the data folder alone but must not leave a Run entry pointing at a deleted exe.
+                try { Services.StartupRegistration.SetEnabled(false); } catch { }
+            })
+            .Run();
+
         WinRT.ComWrappersSupport.InitializeComWrappers();
         (StartInBackground, var folders) = ParseArguments(args);
         FoldersToAdd = folders;

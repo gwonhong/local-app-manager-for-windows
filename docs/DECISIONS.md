@@ -191,6 +191,20 @@
 - `tools/e2e`: UI Automation 스크립트다. 다시 빌드 → 실행(임시 데이터 폴더) → 버튼 클릭 → 상태 읽기.
 - 데이터 폴더는 `LOCALAPPMANAGER_DATA` 환경 변수로 바꿀 수 있다. 테스트는 실제 `%LOCALAPPDATA%\LocalAppManager`를 건드리지 않는다.
 
+## D-012 설치와 업데이트: Velopack (2026-11-18)
+- **결정**: 릴리스는 Velopack(`vpk` 1.2.161, `dotnet-tools.json`에 고정)으로 아키텍처마다 `Setup.exe`, 포터블 zip, 업데이트 피드(nupkg, `releases.<rid>.json`)를 만든다. 앱은 GitHub Releases에서 업데이트한다.
+- **이유**
+  - 출력이 파일 여러 개라 설치 프로그램이 필요하다. 사용자 폴더 설치라 관리자 권한(UAC)이 필요 없다.
+  - 자동 업데이트(델타 포함)가 들어 있다. 업데이트 파일은 브라우저를 거치지 않아 Mark of the Web이 붙지 않으므로, 인증서가 없어도 SmartScreen 경고는 최초 설치 때 한 번뿐이다.
+  - `scripts/build-installer.ps1` 하나로 로컬과 CI가 같은 빌드를 한다. 사용자가 소스에서 직접 설치 프로그램을 만들 수 있다.
+- **세부**
+  - packId는 `LocalAppManager.App`이다. 설치 폴더(`%LocalAppData%\LocalAppManager.App`)가 데이터 폴더(`%LocalAppData%\LocalAppManager`)와 겹치면 제거할 때 데이터까지 지워지기 때문이다.
+  - 채널은 RID(`win-x64`, `win-arm64`)다. 설치된 앱은 자기 아키텍처 채널만 본다. pre-release 빌드(`-`가 붙은 버전)만 pre-release를 받는다.
+  - 시작 10초 뒤 조용히 확인하고 내려받는다. 설치는 앱을 종료할 때 한다(실행 중인 프로젝트를 몰래 끊지 않기 위해서다). 토스트나 설정의 "재시작해서 업데이트"로 바로 할 수도 있다.
+  - exe 경로(`…\current\LocalAppManager.exe`)는 업데이트해도 그대로라 자동 실행 항목이 유지된다. 제거할 때는 자동 실행 항목을 지운다. 데이터 폴더는 남긴다.
+  - 서명은 하지 않는다. 나중에 붙이려면 `vpk pack`에 `--signParams`나 `--azureTrustedSignFile`을 더한다.
+- **대안**: Inno Setup(설치 마법사는 좋지만 업데이터가 없다), WiX/MSI(작업량이 크고 사용자 단위 설치가 어색하다), MSIX(서명 없이는 설치할 수 없다), winget(대상 사용자가 쓰지 못한다).
+
 ## 알려진 한계 / 다음 후보
 - 실행 중인 서버가 `open: true`로 새 브라우저를 직접 띄우면, 그 브라우저도 Job에 속해서 정지할 때 같이 닫힌다(이미 떠 있는 브라우저에 탭이 열리는 경우는 괜찮다). CRA는 `BROWSER=none`으로 막아 두었다.
 - 로그는 줄 단위로만 선택해 복사할 수 있다(TextBlock 단위 선택). 보이는 줄 전체를 복사하는 버튼은 있다.

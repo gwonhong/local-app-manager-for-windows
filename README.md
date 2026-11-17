@@ -43,6 +43,17 @@ WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용�
 
 단축키: `Ctrl+N` 추가 · `Ctrl+F` 로그 검색 · `Ctrl+Enter` 시작/정지 · `Ctrl+R` 재시작 · `Ctrl+L` 로그 지우기
 
+## 설치
+
+[Releases](https://github.com/gwonhong/local-app-manager-for-windows/releases)에서 PC에 맞는 파일을 받습니다(대부분 `win-x64`, Snapdragon 등 ARM PC는 `win-arm64`).
+
+- `LocalAppManager.App-win-x64-Setup.exe`: 설치 프로그램입니다. 사용자 폴더(`%LOCALAPPDATA%\LocalAppManager.App`)에 설치하므로 관리자 권한이 필요 없고, 시작 메뉴에 등록됩니다. 제거는 Windows 설정 → 앱에서 합니다(데이터 폴더는 남습니다).
+- `LocalAppManager.App-win-x64-Portable.zip`: 압축을 풀고 `Local App Manager.exe`를 실행합니다.
+
+코드 서명 인증서가 없어서, 처음 실행할 때 "Windows의 PC 보호" 화면이 뜹니다. **추가 정보 → 실행**을 누릅니다. 의심스러우면 아래처럼 소스에서 직접 설치 프로그램을 만들 수 있습니다.
+
+설치한 앱은 시작할 때 새 버전을 확인해 받아 두고, 앱을 종료할 때 설치합니다. 설정 → "업데이트 확인" / "재시작해서 업데이트"로 바로 할 수도 있습니다. 업데이트는 앱이 직접 받기 때문에 경고 화면이 다시 뜨지 않습니다.
+
 ## 빌드와 실행
 
 필요한 것은 .NET SDK 10입니다. Visual Studio는 없어도 됩니다.
@@ -66,6 +77,14 @@ dotnet publish src/LocalAppManager/LocalAppManager.csproj -c Release -p:Platform
 # → src/LocalAppManager/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/LocalAppManager.exe
 ```
 
+설치 프로그램(Setup.exe, 포터블 zip, 업데이트 파일)은 릴리스와 같은 스크립트로 만듭니다. Velopack CLI(`vpk`)는 `dotnet-tools.json`에 버전이 고정되어 있어 스크립트가 알아서 받습니다.
+
+```powershell
+./scripts/build-installer.ps1                                # 이 PC 아키텍처, 버전은 Directory.Build.props
+./scripts/build-installer.ps1 -Platform ARM64 -Version 0.2.1
+# → artifacts/installer/win-x64/LocalAppManager.App-win-x64-Setup.exe 등
+```
+
 테스트:
 
 ```powershell
@@ -74,7 +93,7 @@ dotnet test tests/LocalAppManager.Core.Tests/LocalAppManager.Core.Tests.csproj
 
 ### 릴리스
 
-`v`로 시작하는 버전 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 테스트를 돌리고 x64와 ARM64 빌드를 zip으로 묶어 GitHub Releases에 올립니다. 일반 커밋 push로는 아무것도 실행되지 않습니다.
+`v`로 시작하는 버전 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 테스트를 돌리고 x64와 ARM64 각각 `scripts/build-installer.ps1`로 Setup.exe, 포터블 zip, 업데이트 파일을 만들어 GitHub Releases에 올립니다. 직전 릴리스가 있으면 델타 업데이트도 만듭니다. 같은 태그를 옮겨서 다시 push하면 그 릴리스의 파일을 새로 빌드한 것으로 바꿉니다. 일반 커밋 push로는 아무것도 실행되지 않습니다.
 
 ```powershell
 git tag v0.2.0
