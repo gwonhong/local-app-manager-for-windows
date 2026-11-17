@@ -61,9 +61,6 @@ public sealed class ProjectDefinition
     /// <summary>Restart automatically (with backoff) when the start command crashes.</summary>
     public bool AutoRestart { get; set; }
 
-    /// <summary>Start this project when the app itself starts.</summary>
-    public bool StartWithApp { get; set; }
-
     /// <summary>Path opened by "Open in browser", e.g. "/admin". The host and port come from the run.</summary>
     public string BrowserPath { get; set; } = "/";
 

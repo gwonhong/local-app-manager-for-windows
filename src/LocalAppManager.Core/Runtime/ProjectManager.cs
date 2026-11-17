@@ -312,10 +312,6 @@ public sealed class ProjectManager
         foreach (var p in Projects) p.KillAll();
     }
 
-    /// <summary>Starts the projects marked "start with app".</summary>
-    public Task StartAutoStartProjectsAsync() =>
-        Task.WhenAll(Projects.Where(p => p.Definition.StartWithApp).Select(p => p.StartExclusiveAsync()));
-
     // ------------------------------------------------------------------ commands
 
     public static string ScriptKey(string script) => "script:" + script;

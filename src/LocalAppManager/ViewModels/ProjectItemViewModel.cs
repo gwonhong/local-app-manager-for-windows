@@ -383,15 +383,6 @@ public sealed partial class ProjectItemViewModel : ObservableObject
         _manager.UpdateProject(def);
         RefreshScripts();
     }
-
-    [RelayCommand]
-    private void ToggleAutoRestart()
-    {
-        var def = Runtime.Definition.Clone();
-        def.AutoRestart = !def.AutoRestart;
-        _manager.UpdateProject(def);
-        Refresh();
-    }
 }
 
 public sealed partial class CommandChipViewModel : ObservableObject

@@ -158,14 +158,21 @@ public sealed partial class MainPage : Page
         _dialogOpen = true;
         try
         {
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || dialog.Result is null) return;
-            ViewModel.Manager.UpdateProject(dialog.Result);
-            project.RefreshScripts();
+            await dialog.ShowAsync();
         }
         finally
         {
             _dialogOpen = false;
         }
+        // Only one ContentDialog can be open at a time, so the removal confirmation comes after this one closed.
+        if (dialog.RemoveRequested)
+        {
+            await RemoveProjectAsync(project);
+            return;
+        }
+        if (dialog.Result is null) return;
+        ViewModel.Manager.UpdateProject(dialog.Result);
+        project.RefreshScripts();
     }
 
     private async Task RemoveProjectAsync(ProjectItemViewModel project)

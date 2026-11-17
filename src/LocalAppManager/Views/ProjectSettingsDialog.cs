@@ -1,6 +1,7 @@
 using LocalAppManager.Core.Projects;
 using LocalAppManager.Core.Runtime;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
@@ -25,9 +26,11 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
     private readonly TextBox _commands = Mono(new TextBox { Header = "추가 명령 (한 줄에 하나, 이름: 명령)", AcceptsReturn = true, MinHeight = 80, PlaceholderText = "lint: pnpm run lint\ntest: pnpm vitest run", TextWrapping = TextWrapping.NoWrap });
     private readonly TextBox _browserPath = Mono(new TextBox { Header = "브라우저로 열 경로", PlaceholderText = "/" });
     private readonly ToggleSwitch _autoRestart = new() { Header = "크래시 시 자동 재시작 (1초부터 두 배씩, 최대 60초 간격)" };
-    private readonly ToggleSwitch _startWithApp = new() { Header = "앱이 시작될 때 같이 시작" };
 
     public ProjectDefinition? Result { get; private set; }
+
+    /// <summary>The user pressed "remove project"; the caller asks for confirmation once this dialog is closed.</summary>
+    public bool RemoveRequested { get; private set; }
 
     public ProjectSettingsDialog(ProjectManager manager, ProjectDefinition definition, bool focusCommands)
     {
@@ -123,7 +126,36 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         panel.Children.Add(_env);
         panel.Children.Add(_browserPath);
         panel.Children.Add(_autoRestart);
-        panel.Children.Add(_startWithApp);
+
+        // Removing the project (the confirmation follows once this dialog is closed).
+        var remove = new Button
+        {
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    new FontIcon { Glyph = "\uE74D", FontSize = 14 },
+                    new TextBlock { Text = "목록에서 제거…" },
+                },
+            },
+            Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"],
+        };
+        AutomationProperties.SetAutomationId(remove, "RemoveProjectButton");
+        remove.Click += (_, _) =>
+        {
+            RemoveRequested = true;
+            Hide();
+        };
+        panel.Children.Add(Section("프로젝트 제거"));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "목록에서만 지웁니다. 프로젝트 폴더와 파일은 그대로 둡니다.",
+            Style = (Style)Application.Current.Resources["CaptionSecondaryStyle"],
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(remove);
 
         return new ScrollViewer { Content = panel, MaxHeight = 640, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
@@ -157,7 +189,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         _commands.Text = string.Join("\r", _draft.Commands.Select(c => $"{c.Name}: {c.Command}"));
         _browserPath.Text = _draft.BrowserPath;
         _autoRestart.IsOn = _draft.AutoRestart;
-        _startWithApp.IsOn = _draft.StartWithApp;
     }
 
     private static void SelectByTag(ComboBox combo, object tag)
@@ -208,7 +239,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         d.PortEnvVar = string.IsNullOrWhiteSpace(_portEnv.Text) ? "PORT" : _portEnv.Text.Trim();
         d.BrowserPath = string.IsNullOrWhiteSpace(_browserPath.Text) ? "/" : _browserPath.Text.Trim();
         d.AutoRestart = _autoRestart.IsOn;
-        d.StartWithApp = _startWithApp.IsOn;
 
         d.Environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in Lines(_env.Text))

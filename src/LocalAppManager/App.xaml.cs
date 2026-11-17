@@ -94,8 +94,6 @@ public partial class App : Application
         }
         AppLog.Info($"launched (background={Program.StartInBackground})");
         foreach (var folder in Program.FoldersToAdd) _window.Page.AddFolder(folder);
-
-        Ui.Forget(Manager.StartAutoStartProjectsAsync(), "auto-start projects");
     }
 
     private void OnRedirected(AppActivationArguments e)

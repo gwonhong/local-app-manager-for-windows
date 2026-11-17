@@ -412,21 +412,6 @@
                             ToolTipService.ToolTip="프로젝트 설정">
                             <FontIcon FontSize="16" Glyph="&#xE713;" />
                         </Button>
-                        <Button AutomationProperties.Name="더 보기" Style="{StaticResource IconButtonStyle}" ToolTipService.ToolTip="더 보기">
-                            <FontIcon FontSize="16" Glyph="&#xE712;" />
-                            <Button.Flyout>
-                                <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                    <ToggleMenuFlyoutItem Command="{x:Bind ViewModel.SelectedProject.ToggleAutoRestartCommand, Mode=OneWay}" IsChecked="{x:Bind ViewModel.SelectedProject.AutoRestart, Mode=OneWay}" Text="크래시 시 자동 재시작" />
-                                    <MenuFlyoutItem Command="{x:Bind ViewModel.SelectedProject.AddCustomCommandCommand, Mode=OneWay}" Text="명령 추가…">
-                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
-                                    <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Command="{x:Bind ViewModel.SelectedProject.RemoveCommand, Mode=OneWay}" Text="목록에서 제거…">
-                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
-                                </MenuFlyout>
-                            </Button.Flyout>
-                        </Button>
                     </StackPanel>
                 </Grid>
 
