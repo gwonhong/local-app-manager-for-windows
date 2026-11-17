@@ -197,12 +197,70 @@ public sealed partial class MainPage : Page
         await ViewModel.RemoveProjectAsync(project);
     }
 
-    private void ReassignPort_Click(object sender, RoutedEventArgs e)
+    // ------------------------------------------------------------------ port pinning (header pin button)
+
+    private void PinPortFlyout_Opening(object sender, object e)
     {
         if (ViewModel.SelectedProject is not { } p) return;
-        int? port = ViewModel.Manager.ReassignPort(p.Id);
+        bool pinned = p.HasPinnedPort;
+        PinPortBox.Value = ViewModel.Manager.SuggestPinPort(p.Id) ?? double.NaN;
+        UnpinButton.Visibility = pinned ? Visibility.Visible : Visibility.Collapsed;
+        PinApplyButton.Content = pinned ? "변경" : "고정";
+        Grid.SetColumn(PinApplyButton, pinned ? 1 : 0);
+        Grid.SetColumnSpan(PinApplyButton, pinned ? 1 : 2);
+        UpdatePinStatus();
+    }
+
+    private void PinPortBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => UpdatePinStatus();
+
+    private int? PinPortValue => double.IsNaN(PinPortBox.Value) ? null : (int)PinPortBox.Value;
+
+    /// <summary>Warns about the chosen port before pinning: another project pins it, or something else is using it.</summary>
+    private void UpdatePinStatus()
+    {
+        if (ViewModel.SelectedProject is not { } p || PinPortValue is not int port)
+        {
+            PinPortStatus.Text = "";
+            PinApplyButton.IsEnabled = false;
+            return;
+        }
+        var clash = ViewModel.Manager.PinnedBy(port, p.Id);
+        PinApplyButton.IsEnabled = clash is null;
+        bool ours = p.Runtime.ListeningPorts.Contains(port);
+        PinPortStatus.Text =
+            clash is not null ? $"⚠ {clash.Definition.Name}이(가) 이미 고정한 포트입니다."
+            : !ours && !Core.Ports.PortProbe.IsFree(port) ? "⚠ 지금 다른 프로그램이 쓰고 있습니다. 시작할 때 비어 있어야 합니다."
+            : p.IsActive && p.Runtime.RunPort != port ? "실행 중입니다. 재시작하면 적용됩니다."
+            : "";
+    }
+
+    private void PinFindFree_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedProject is not { } p) return;
+        if (ViewModel.Manager.AllocatePort(p.Id, PinPortValue) is int free) PinPortBox.Value = free;
+        else PinPortStatus.Text = "앱의 포트 범위에 빈 포트가 없습니다.";
+    }
+
+    private void PinApply_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedProject is not { } p || PinPortValue is not int port) return;
+        if (ViewModel.Manager.PinPort(p.Id, port) is { } clash)
+        {
+            PinPortStatus.Text = $"⚠ {clash.Definition.Name}이(가) 이미 고정한 포트입니다.";
+            return;
+        }
         p.Refresh();
-        ShowToast(port is int n ? $"포트를 {n}(으)로 바꿨습니다." + (p.IsActive ? " 재시작하면 적용됩니다." : "") : "범위 안에 빈 포트가 없습니다.", port is null ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+        PinPortFlyout.Hide();
+        ShowToast($"포트를 {port}(으)로 고정했습니다." + (p.IsActive && p.Runtime.RunPort != port ? " 재시작하면 적용됩니다." : ""));
+    }
+
+    private void Unpin_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedProject is not { } p) return;
+        ViewModel.Manager.PinPort(p.Id, null);
+        p.Refresh();
+        PinPortFlyout.Hide();
+        ShowToast("포트 고정을 풀었습니다." + (p.IsActive ? " 재시작하면 적용됩니다." : ""), InfoBarSeverity.Informational);
     }
 
     private void ProjectList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)

@@ -71,13 +71,16 @@ public class FrameworkDetectorTests
         {
             var r = FrameworkDetector.Detect(d.Path);
             Assert.Equal("django", r.Framework.Id);
-            Assert.Equal("python manage.py runserver {port}", r.StartCommand);
+            Assert.Equal("python manage.py runserver", r.StartCommand);
+            Assert.True(r.Framework.CanPinPort);
+            var pinned = new ProjectDefinition { StartCommand = r.StartCommand, Port = 4300, PortMode = r.Framework.PortMode, PortArgs = r.Framework.PortArgs };
+            Assert.Equal("python manage.py runserver 4300", CommandBuilder.BuildStart(pinned, new Dictionary<string, string>()).ShellCommand);
         }
         using (var d = new TempDir().File("pyproject.toml", "[project]\ndependencies = [\"fastapi>=0.110\", \"uvicorn\"]\n").File("uv.lock").File("app/main.py", "api = FastAPI()\n"))
         {
             var r = FrameworkDetector.Detect(d.Path);
             Assert.Equal("fastapi", r.Framework.Id);
-            Assert.Equal("uv run uvicorn app.main:api --reload --port {port}", r.StartCommand);
+            Assert.Equal("uv run uvicorn app.main:api --reload", r.StartCommand);
         }
     }
 
@@ -154,26 +157,54 @@ public class CommandBuilderTests
 public class ProjectManagerTests
 {
     [Fact]
-    public void Add_detects_assigns_port_and_persists()
+    public void Add_detects_and_persists_without_pinning_a_port()
     {
         using var data = new TempDir();
         using var proj = new TempDir().File("package.json", """{"name":"a","scripts":{"dev":"vite"}}""");
         var m = new ProjectManager(new AppPaths(data.Path), new Ports.PortAllocator(_ => true));
         m.Load();
         var r = m.AddProject(proj.Path);
-        Assert.Equal(4100, r.Definition.Port);
+        Assert.Null(r.Definition.Port); // observed, not pinned
+        Assert.Equal(PortMode.Args, r.Definition.PortMode); // ready if the user pins one
         Assert.Same(r, m.AddProject(proj.Path + "\\")); // same folder isn't added twice
 
         using var proj2 = new TempDir().File("package.json", """{"name":"a","scripts":{"dev":"next dev"},"dependencies":{"next":"1"}}""");
         var r2 = m.AddProject(proj2.Path);
-        Assert.Equal(4101, r2.Definition.Port);
+        Assert.Null(r2.Definition.Port);
         Assert.Equal("a (2)", r2.Definition.Name);
 
         var m2 = new ProjectManager(new AppPaths(data.Path));
         m2.Load();
         Assert.Equal(2, m2.Projects.Count);
-        Assert.Equal(4101, m2.Projects[1].Definition.Port);
+        Assert.Null(m2.Projects[1].Definition.Port);
         Assert.Equal(PortMode.Env, m2.Projects[1].Definition.PortMode);
+    }
+
+    [Fact]
+    public void Pin_and_unpin_a_port()
+    {
+        using var data = new TempDir();
+        using var a = new TempDir().File("package.json", """{"name":"a","scripts":{"dev":"vite"}}""");
+        using var b = new TempDir().File("package.json", """{"name":"b","scripts":{"dev":"vite"}}""");
+        var m = new ProjectManager(new AppPaths(data.Path), new Ports.PortAllocator(_ => true));
+        m.Load();
+        var ra = m.AddProject(a.Path);
+        var rb = m.AddProject(b.Path);
+
+        Assert.Equal(4100, m.SuggestPinPort(ra.Id)); // nothing seen yet: a free one from the range
+        Assert.Null(m.PinPort(ra.Id, 4100));
+        Assert.Equal(4100, ra.Definition.Port);
+        Assert.Equal(4100, m.SuggestPinPort(ra.Id)); // pinned: suggest the pinned one
+
+        Assert.Same(ra, m.PinPort(rb.Id, 4100)); // taken by a: refused
+        Assert.Null(rb.Definition.Port);
+        Assert.Equal(4101, m.SuggestPinPort(rb.Id));
+
+        Assert.Null(m.PinPort(ra.Id, null));
+        Assert.Null(ra.Definition.Port);
+        var reloaded = new ProjectManager(new AppPaths(data.Path));
+        reloaded.Load();
+        Assert.Null(reloaded.Projects[0].Definition.Port);
     }
 
     [Fact]

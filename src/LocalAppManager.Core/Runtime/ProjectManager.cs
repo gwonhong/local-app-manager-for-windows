@@ -135,6 +135,7 @@ public sealed class ProjectManager
     {
         var runtime = new ProjectRuntime(def, new LogBuffer(Settings.LogCapacity), () => EnvironmentBuilder.CreateBase());
         runtime.Changed += r => ProjectChanged?.Invoke(r);
+        runtime.LastPortChanged += _ => SaveProjects();
         runtime.Crashed += (r, code) =>
         {
             AppLog.Warn($"project '{r.Definition.Name}' crashed with code {code}");
@@ -145,7 +146,7 @@ public sealed class ProjectManager
 
     // ------------------------------------------------------------------ projects
 
-    /// <summary>Detects the framework in <paramref name="path"/>, assigns a port and registers it.</summary>
+    /// <summary>Detects the framework in <paramref name="path"/> and registers it. No port is pinned; see <see cref="ProjectDefinition.Port"/>.</summary>
     public ProjectRuntime AddProject(string path)
     {
         path = Path.GetFullPath(path).TrimEnd('\\');
@@ -166,7 +167,6 @@ public sealed class ProjectManager
             PortMode = detection.Framework.PortMode,
             PortArgs = detection.Framework.PortArgs,
         };
-        if (detection.UsesPort) def.Port = AllocatePort(null);
 
         var runtime = CreateRuntime(def);
         lock (_gate) _projects.Add(runtime);
@@ -194,6 +194,7 @@ public sealed class ProjectManager
         var runtime = Get(updated.Id) ?? throw new InvalidOperationException("unknown project");
         Normalize(updated);
         var old = runtime.Definition;
+        updated.LastPort = old.LastPort; // observed by the runtime, not edited in the dialog
         runtime.OnDefinitionChanged(old, updated.Clone());
         SaveProjects();
         if (old.Name != updated.Name) ProjectsChanged?.Invoke();
@@ -235,6 +236,46 @@ public sealed class ProjectManager
         lock (_gate)
             assigned = _projects.Where(p => p.Id != forProjectId && p.Definition.Port is not null).Select(p => p.Definition.Port!.Value).ToList();
         return _allocator.Allocate(Settings.PortRangeStart, Settings.PortRangeEnd, assigned, preferAfter);
+    }
+
+    /// <summary>The project, other than <paramref name="exceptId"/>, that already has <paramref name="port"/> pinned.</summary>
+    public ProjectRuntime? PinnedBy(int port, string? exceptId)
+    {
+        lock (_gate) return _projects.FirstOrDefault(p => p.Id != exceptId && p.Definition.Port == port);
+    }
+
+    /// <summary>
+    /// Pins the project to <paramref name="port"/> (null unpins it) and saves. Returns the other project that already
+    /// pins that port, in which case nothing changes. A running project picks the change up on its next start.
+    /// </summary>
+    public ProjectRuntime? PinPort(string id, int? port)
+    {
+        var runtime = Get(id);
+        if (runtime is null) return null;
+        if (port is int p && PinnedBy(p, id) is { } clash) return clash;
+        if (runtime.Definition.Port == port) return null;
+        var def = runtime.Definition.Clone();
+        def.Port = port;
+        runtime.OnDefinitionChanged(runtime.Definition, def);
+        runtime.ClearError();
+        runtime.Log.System(port is int n ? $"포트를 {n}(으)로 고정했습니다." : "포트 고정을 풀었습니다.");
+        SaveProjects();
+        return null;
+    }
+
+    /// <summary>
+    /// The port to suggest when pinning: the one already pinned, else the last-seen one if no other project pins it
+    /// and it's free (or this project is the one using it), else a free one from the app's range.
+    /// </summary>
+    public int? SuggestPinPort(string id)
+    {
+        var runtime = Get(id);
+        if (runtime is null) return null;
+        if (runtime.Definition.Port is int pinned) return pinned;
+        if (runtime.Definition.LastPort is int last && PinnedBy(last, id) is null
+            && (runtime.ListeningPorts.Contains(last) || PortProbe.IsFree(last)))
+            return last;
+        return AllocatePort(id);
     }
 
     /// <summary>Gives the project a new port (after a conflict) and saves it.</summary>

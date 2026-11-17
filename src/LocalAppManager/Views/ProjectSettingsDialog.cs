@@ -16,8 +16,7 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
     private readonly TextBox _path = Mono(new TextBox { Header = "폴더", IsReadOnly = true });
     private readonly ComboBox _framework = new() { Header = "프레임워크", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _command = Mono(new TextBox { Header = "시작 명령", PlaceholderText = "예: pnpm run dev" });
-    private readonly CheckBox _usePort = new() { Content = "이 프로젝트에 포트 배정" };
-    private readonly NumberBox _port = new() { Header = "포트", Minimum = 1, Maximum = 65535, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 160 };
+    private readonly StackPanel _portSection = new() { Spacing = 12 };
     private readonly ComboBox _portMode = new() { Header = "포트 전달 방식", HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBox _portArgs = Mono(new TextBox { Header = "붙일 인자", PlaceholderText = "--port {port}" });
     private readonly TextBox _portEnv = Mono(new TextBox { Header = "환경 변수 이름", PlaceholderText = "PORT" });
@@ -27,7 +26,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
     private readonly TextBox _browserPath = Mono(new TextBox { Header = "브라우저로 열 경로", PlaceholderText = "/" });
     private readonly ToggleSwitch _autoRestart = new() { Header = "크래시 시 자동 재시작 (1초부터 두 배씩, 최대 60초 간격)" };
     private readonly ToggleSwitch _startWithApp = new() { Header = "앱이 시작될 때 같이 시작" };
-    private readonly TextBlock _portStatus = new() { Style = (Style)Application.Current.Resources["CaptionSecondaryStyle"], VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 8) };
 
     public ProjectDefinition? Result { get; private set; }
 
@@ -53,9 +51,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         Content = BuildLayout();
 
         foreach (var tb in new[] { _command, _portArgs, _portEnv, _env }) tb.TextChanged += (_, _) => UpdatePreview();
-        _port.ValueChanged += (_, _) => UpdatePreview();
-        _usePort.Checked += (_, _) => { EnsurePort(); UpdatePreview(); };
-        _usePort.Unchecked += (_, _) => UpdatePreview();
         _portMode.SelectionChanged += (_, _) => UpdatePreview();
         _framework.SelectionChanged += (_, _) => OnFrameworkChanged();
         PrimaryButtonClick += OnSave;
@@ -77,16 +72,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         var detect = new Button { Content = "다시 감지", VerticalAlignment = VerticalAlignment.Bottom };
         ToolTipService.SetToolTip(detect, "폴더를 다시 살펴서 프레임워크·시작 명령·포트 방식을 채웁니다.");
         detect.Click += (_, _) => Redetect();
-
-        var autoPort = new Button { Content = "빈 포트 배정", VerticalAlignment = VerticalAlignment.Bottom };
-        autoPort.Click += (_, _) =>
-        {
-            if (_manager.AllocatePort(_draft.Id, (int?)SafeInt(_port.Value)) is int p)
-            {
-                _port.Value = p;
-                _usePort.IsChecked = true;
-            }
-        };
 
         var help = new TextBlock
         {
@@ -120,11 +105,18 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         panel.Children.Add(_path);
         panel.Children.Add(_command);
         panel.Children.Add(help);
-        panel.Children.Add(Section("포트"));
-        panel.Children.Add(_usePort);
-        panel.Children.Add(Row(_port, autoPort, _portStatus));
-        panel.Children.Add(_portMode);
-        panel.Children.Add(Row(_portArgs, _portEnv));
+        // Pinning itself lives in the project header (pin button). This only says how a pinned port reaches the
+        // server, and is shown only for dev servers we know how to hand a port to (or when one is already pinned).
+        _portSection.Children.Add(Section("포트 전달 방식"));
+        _portSection.Children.Add(new TextBlock
+        {
+            Text = "위쪽 핀 버튼으로 포트를 고정하면 이 방식으로 서버에 넘깁니다. 고정하지 않으면 아무것도 넘기지 않고, 실제로 열린 포트만 보여 줍니다.",
+            Style = (Style)Application.Current.Resources["CaptionSecondaryStyle"],
+            TextWrapping = TextWrapping.Wrap,
+        });
+        _portSection.Children.Add(_portMode);
+        _portSection.Children.Add(Row(_portArgs, _portEnv));
+        panel.Children.Add(_portSection);
         panel.Children.Add(previewCard);
         panel.Children.Add(Section("추가 설정"));
         panel.Children.Add(_commands);
@@ -157,8 +149,7 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         _path.Text = _draft.Path;
         SelectByTag(_framework, _draft.Framework);
         _command.Text = _draft.StartCommand;
-        _usePort.IsChecked = _draft.Port is not null;
-        _port.Value = _draft.Port ?? double.NaN;
+        UpdatePortSectionVisibility(FrameworkDetector.ById(_draft.Framework));
         SelectByTag(_portMode, _draft.PortMode);
         _portArgs.Text = _draft.PortArgs;
         _portEnv.Text = _draft.PortEnvVar;
@@ -186,6 +177,7 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         SelectByTag(_portMode, fw.PortMode);
         if (fw.PortMode == PortMode.Args) _portArgs.Text = fw.PortArgs;
         _draft.Framework = id;
+        UpdatePortSectionVisibility(fw);
         UpdatePreview();
     }
 
@@ -198,25 +190,19 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         if (!string.IsNullOrEmpty(d.StartCommand)) _command.Text = d.StartCommand;
         SelectByTag(_portMode, d.Framework.PortMode);
         _portArgs.Text = d.Framework.PortArgs;
-        _usePort.IsChecked = d.UsesPort;
-        if (d.UsesPort) EnsurePort();
+        UpdatePortSectionVisibility(d.Framework);
         UpdatePreview();
     }
 
-    private void EnsurePort()
-    {
-        if (!double.IsNaN(_port.Value)) return;
-        if (_manager.AllocatePort(_draft.Id) is int p) _port.Value = p;
-    }
-
-    private static int? SafeInt(double v) => double.IsNaN(v) ? null : (int)v;
+    private void UpdatePortSectionVisibility(FrameworkInfo fw) =>
+        _portSection.Visibility = fw.CanPinPort || _draft.Port is not null || _draft.StartCommand.Contains("{port}")
+            ? Visibility.Visible : Visibility.Collapsed;
 
     private ProjectDefinition Collect()
     {
         var d = _draft.Clone();
         d.Name = _name.Text.Trim();
         d.StartCommand = _command.Text.Trim();
-        d.Port = _usePort.IsChecked == true ? SafeInt(_port.Value) : null;
         d.PortMode = SelectedPortMode;
         d.PortArgs = _portArgs.Text.Trim();
         d.PortEnvVar = string.IsNullOrWhiteSpace(_portEnv.Text) ? "PORT" : _portEnv.Text.Trim();
@@ -247,11 +233,8 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
 
     private void UpdatePreview()
     {
-        bool usePort = _usePort.IsChecked == true;
-        _port.IsEnabled = usePort;
-        _portMode.IsEnabled = usePort;
-        _portArgs.IsEnabled = usePort && SelectedPortMode == PortMode.Args;
-        _portEnv.IsEnabled = usePort && SelectedPortMode == PortMode.Env;
+        _portArgs.IsEnabled = SelectedPortMode == PortMode.Args;
+        _portEnv.IsEnabled = SelectedPortMode == PortMode.Env;
 
         var d = Collect();
         if (string.IsNullOrWhiteSpace(d.StartCommand))
@@ -265,17 +248,8 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         foreach (var (k, v) in d.Environment) vars.Add($"{k}={v}");
         var fw = FrameworkDetector.ById(d.Framework);
         if (fw.ExtraEnv is not null) vars.AddRange(fw.ExtraEnv.Where(kv => !d.Environment.ContainsKey(kv.Key)).Select(kv => $"{kv.Key}={kv.Value}"));
-        _preview.Text = built.ShellCommand + (vars.Count > 0 ? "\n환경 변수: " + string.Join("  ", vars) : "");
-
-        if (usePort && d.Port is int port)
-        {
-            var owner = _manager.Projects.FirstOrDefault(x => x.Id != d.Id && x.Definition.Port == port);
-            _portStatus.Text = owner is not null ? $"⚠ {owner.Definition.Name}와 겹칩니다" : port < _manager.Settings.PortRangeStart || port > _manager.Settings.PortRangeEnd ? "앱 범위 밖의 포트" : "";
-        }
-        else
-        {
-            _portStatus.Text = "";
-        }
+        _preview.Text = built.ShellCommand + (vars.Count > 0 ? "\n환경 변수: " + string.Join("  ", vars) : "")
+            + (d.Port is null && d.StartCommand.Contains("{port}") ? "\n⚠ 포트를 고정하지 않으면 {port}가 그대로 남습니다." : "");
     }
 
     private void OnSave(ContentDialog sender, ContentDialogButtonClickEventArgs args)
@@ -285,13 +259,6 @@ public sealed partial class ProjectSettingsDialog : ContentDialog
         {
             args.Cancel = true;
             _name.Focus(FocusState.Programmatic);
-            return;
-        }
-        if (d.Port is int p && _manager.Projects.FirstOrDefault(x => x.Id != d.Id && x.Definition.Port == p) is { } clash)
-        {
-            args.Cancel = true;
-            _portStatus.Text = $"⚠ {clash.Definition.Name}와 겹칩니다 — 다른 포트를 고르세요";
-            _port.Focus(FocusState.Programmatic);
             return;
         }
         Result = d;

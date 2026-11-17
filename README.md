@@ -1,7 +1,7 @@
 # Local App Manager For Windows
 
 로컬 개발 서버(Vite, Next, Node, Python 등)를 즐겨찾기처럼 등록해 두고, 버튼으로 실행 / 정지 / 재시작하는 Windows 데스크톱 앱입니다.
-스크립트와 빌드도 버튼으로 돌립니다. 프로젝트마다 겹치지 않는 포트를 배정하고, 프로세스 트리를 확실하게 정리합니다.
+스크립트와 빌드도 버튼으로 돌립니다. 실제로 열린 포트를 보여 주고(원하면 포트를 고정), 프로세스 트리를 확실하게 정리합니다.
 
 WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용입니다.
 설계 결정과 그 이유는 [docs/DECISIONS.md](docs/DECISIONS.md)에 있습니다.
@@ -12,10 +12,10 @@ WinUI 3 (Windows App SDK 2.6) + C# / .NET 10. Windows 10 2004 이상, 개인용�
   - 프레임워크를 자동으로 감지합니다: Vite, SvelteKit, Next, Nuxt, Astro, Angular, CRA, Remix, Nest, Express류, Django, FastAPI, Flask, Streamlit.
   - 패키지 매니저(npm/pnpm/yarn/bun)와 시작 스크립트도 알아냅니다.
 - **포트**:
-  - 4100–4999 범위에서 프로젝트마다 고정 포트를 배정합니다.
-  - 실행 직전에 포트가 비었는지 확인합니다. 사용 중이면 점유 중인 프로세스를 보여 주고, "다른 포트로 시작" 버튼을 띄웁니다.
-  - 포트는 Vite면 `--port N --strictPort`로, Next/CRA/Express류면 `PORT` 환경 변수로, 그 밖에는 명령 안의 `{port}`로 전달합니다.
-  - 실제 리슨 포트와, 로그에 찍힌 URL을 함께 보여 줍니다.
+  - 기본은 관찰만 합니다. 앱은 포트를 넘기지 않고, 프로세스 트리가 실제로 리슨하는 포트와 로그에 찍힌 URL을 보여 줍니다.
+  - 목록에는 실행 중이면 지금 리슨 중인 포트를 초록 배지로, 정지 상태면 흐린 숫자로 보여 줍니다. 고정했으면 고정 포트(핀 아이콘), 아니면 마지막으로 쓴 포트(기록 아이콘)입니다.
+  - 알려진 프레임워크(Vite, Next, Django 등)는 프로젝트 화면 오른쪽 위의 **📌 포트 고정** 버튼으로 포트를 고정할 수 있습니다. 마지막으로 쓴 포트가 비어 있으면 그것을, 아니면 4100–4999 범위의 빈 포트를 제안합니다. 고정한 포트는 Vite면 `--port N --strictPort`로, Next/CRA/Express류면 `PORT` 환경 변수로, Django/FastAPI/Flask/Streamlit은 인자로 넘깁니다(전달 방식은 프로젝트 설정에서 바꿀 수 있습니다). 명령 안의 `{port}`도 고정 포트로 바뀝니다.
+  - 고정 포트는 실행 직전에 비었는지 확인합니다. 사용 중이면 점유 중인 프로세스를 보여 주고, "다른 포트로 시작" 버튼을 띄웁니다.
 - **프로세스**:
   - 실행마다 Job Object(`KILL_ON_JOB_CLOSE`)를 하나씩 쓰고, 프로세스를 생성하는 순간부터 그 Job 안에 넣습니다.
   - 정지할 때는 Ctrl+C를 먼저 보내고(npm/pnpm `.cmd` shim의 "일괄 작업을 끝내시겠습니까?"에도 자동으로 답합니다), 3초 안에 끝나지 않으면 트리 전체를 종료합니다.
@@ -77,7 +77,7 @@ dotnet test tests/LocalAppManager.Core.Tests/LocalAppManager.Core.Tests.csproj
 
 `%LOCALAPPDATA%\LocalAppManager\`
 
-- `projects.json`: 프로젝트와 그룹(이름, 경로, 명령, 포트, 환경 변수 등)
+- `projects.json`: 프로젝트와 그룹(이름, 경로, 명령, 고정 포트, 마지막으로 쓴 포트, 환경 변수 등)
 - `settings.json`: 앱 설정, 창 위치
 - `logs\app.log`: 앱 자체의 진단 로그(프로젝트 출력은 저장하지 않습니다)
 

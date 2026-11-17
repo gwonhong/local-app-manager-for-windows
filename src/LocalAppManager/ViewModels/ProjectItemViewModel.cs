@@ -35,7 +35,24 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     [ObservableProperty] public partial string StateText { get; private set; } = "";
     [ObservableProperty] public partial bool IsActive { get; private set; }
     [ObservableProperty] public partial bool IsStarting { get; private set; }
+    /// <summary>The pinned port (":4100"), empty when the project isn't pinned.</summary>
     [ObservableProperty] public partial string PortText { get; private set; } = "";
+
+    /// <summary>Port shown in the list: what the run listens on while active, else the last-seen port (or the pinned one if it never ran).</summary>
+    [ObservableProperty] public partial string PortBadge { get; private set; } = "";
+    [ObservableProperty] public partial string PortBadgeTooltip { get; private set; } = "";
+    /// <summary>The badge shows a port the process is listening on right now.</summary>
+    [ObservableProperty] public partial bool IsPortLive { get; private set; }
+    /// <summary>The badge shows a remembered port (last seen, or pinned), not a live one.</summary>
+    [ObservableProperty] public partial bool IsPortIdle { get; private set; }
+    [ObservableProperty] public partial bool IsPortPinned { get; private set; }
+    /// <summary>The header's pin button is offered: a dev server we know how to hand a port to, or one already pinned.</summary>
+    [ObservableProperty] public partial bool CanPinPort { get; private set; }
+    /// <summary>The definition pins a port (what the next start uses; may differ from the running one).</summary>
+    [ObservableProperty] public partial bool HasPinnedPort { get; private set; }
+    [ObservableProperty] public partial string PinButtonText { get; private set; } = "";
+    /// <summary>The idle badge is a last-seen port of an unpinned project (history icon instead of the pin).</summary>
+    [ObservableProperty] public partial bool IsPortLastSeen { get; private set; }
     [ObservableProperty] public partial string? Url { get; private set; }
     [ObservableProperty] public partial string? ListeningText { get; private set; }
     [ObservableProperty] public partial string? ErrorMessage { get; private set; }
@@ -110,10 +127,15 @@ public sealed partial class ProjectItemViewModel : ObservableObject
             _ => r.State.ToString(),
         };
 
-        int? port = r.IsActive ? r.RunPort : def.Port;
+        int? pinned = r.IsActive ? r.RunPort : def.Port;
         bool usesPort = def.Port is not null && (def.PortMode != PortMode.None || def.StartCommand.Contains("{port}"));
-        PortText = usesPort && port is int p ? $":{p}" : "";
-        Subtitle = string.Join(" · ", new[] { FrameworkName, PortText.Length > 0 ? PortText : null }.Where(s => !string.IsNullOrEmpty(s)));
+        PortText = usesPort && pinned is int p ? $":{p}" : "";
+        IsPortPinned = PortText.Length > 0;
+        CanPinPort = fw.CanPinPort || def.Port is not null;
+        HasPinnedPort = def.Port is not null;
+        PinButtonText = def.Port is int dp ? $":{dp}" : "포트 고정";
+        Subtitle = FrameworkName;
+        UpdatePortBadge(r, usesPort ? pinned : null);
         Url = r.IsActive ? r.BrowserUrl : null;
         ListeningText = r.IsActive && r.ListeningPorts.Count > 0 ? string.Join(", ", r.ListeningPorts.Select(x => ":" + x)) : null;
         ErrorMessage = r.LastError;
@@ -126,6 +148,27 @@ public sealed partial class ProjectItemViewModel : ObservableObject
 
         HasRunningCommands = r.CommandRuns.Count > 0;
         UpdateChips();
+    }
+
+    private void UpdatePortBadge(ProjectRuntime r, int? pinned)
+    {
+        if (r.IsActive && r.LivePort is int live)
+        {
+            int extra = r.ListeningPorts.Count - 1;
+            PortBadge = extra > 0 ? $":{live} +{extra}" : $":{live}";
+            PortBadgeTooltip = "지금 리슨 중: " + string.Join(", ", r.ListeningPorts.Select(x => ":" + x)) + (pinned == live ? " (고정)" : "");
+            IsPortLive = true;
+            IsPortIdle = false;
+            IsPortLastSeen = false;
+            return;
+        }
+        // A pinned port is what the next start uses, so it wins over a (possibly older) last-seen one.
+        int? remembered = pinned ?? r.Definition.LastPort;
+        PortBadge = remembered is int rp ? $":{rp}" : "";
+        PortBadgeTooltip = remembered is null ? "" : pinned is not null ? "고정 포트" : "마지막으로 쓴 포트";
+        IsPortLive = false;
+        IsPortIdle = remembered is not null;
+        IsPortLastSeen = IsPortIdle && pinned is null;
     }
 
     /// <summary>

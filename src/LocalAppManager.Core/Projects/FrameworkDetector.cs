@@ -3,7 +3,11 @@ using System.Text.RegularExpressions;
 
 namespace LocalAppManager.Core.Projects;
 
-public sealed record FrameworkInfo(string Id, string DisplayName, PortMode PortMode, string PortArgs = "--port {port}", IReadOnlyDictionary<string, string>? ExtraEnv = null);
+public sealed record FrameworkInfo(string Id, string DisplayName, PortMode PortMode, string PortArgs = "--port {port}", IReadOnlyDictionary<string, string>? ExtraEnv = null)
+{
+    /// <summary>A dev server we know how to hand a port to, so pinning one is offered.</summary>
+    public bool CanPinPort => PortMode != PortMode.None;
+}
 
 public sealed record DetectionResult(
     string Name,
@@ -30,10 +34,10 @@ public static partial class FrameworkDetector
     public static readonly FrameworkInfo Remix = new("remix", "Remix", PortMode.Env);
     public static readonly FrameworkInfo Nest = new("nest", "NestJS", PortMode.Env);
     public static readonly FrameworkInfo NodeServer = new("node", "Node.js", PortMode.Env);
-    public static readonly FrameworkInfo Django = new("django", "Django", PortMode.None);
-    public static readonly FrameworkInfo FastApi = new("fastapi", "FastAPI", PortMode.None);
-    public static readonly FrameworkInfo Flask = new("flask", "Flask", PortMode.None);
-    public static readonly FrameworkInfo Streamlit = new("streamlit", "Streamlit", PortMode.None);
+    public static readonly FrameworkInfo Django = new("django", "Django", PortMode.Args, "{port}");
+    public static readonly FrameworkInfo FastApi = new("fastapi", "FastAPI", PortMode.Args);
+    public static readonly FrameworkInfo Flask = new("flask", "Flask", PortMode.Args);
+    public static readonly FrameworkInfo Streamlit = new("streamlit", "Streamlit", PortMode.Args, "--server.port {port}");
     public static readonly FrameworkInfo Python = new("python", "Python", PortMode.None);
 
     public static IReadOnlyList<FrameworkInfo> All { get; } =
@@ -196,26 +200,26 @@ public static partial class FrameworkDetector
         string py = run + "python";
 
         if (hasManage || Has("django"))
-            return new(folderName, Django, null, $"{py} manage.py runserver {{port}}", new Dictionary<string, string>(), true);
+            return new(folderName, Django, null, $"{py} manage.py runserver", new Dictionary<string, string>(), true);
 
         if (Has("fastapi"))
         {
             string module = FindAsgiModule(dir) ?? "main:app";
             string uvicorn = run + "uvicorn";
-            return new(folderName, FastApi, null, $"{uvicorn} {module} --reload --port {{port}}", new Dictionary<string, string>(), true);
+            return new(folderName, FastApi, null, $"{uvicorn} {module} --reload", new Dictionary<string, string>(), true);
         }
 
         if (Has("flask"))
         {
             string flask = run + "flask";
-            return new(folderName, Flask, null, $"{flask} run --debug --port {{port}}", new Dictionary<string, string>(), true);
+            return new(folderName, Flask, null, $"{flask} run --debug", new Dictionary<string, string>(), true);
         }
 
         if (Has("streamlit"))
         {
             string entry = new[] { "app.py", "streamlit_app.py", "main.py", "Home.py" }.FirstOrDefault(f => File.Exists(P(f))) ?? "app.py";
             string st = run + "streamlit";
-            return new(folderName, Streamlit, null, $"{st} run {entry} --server.port {{port}} --server.headless true", new Dictionary<string, string>(), true);
+            return new(folderName, Streamlit, null, $"{st} run {entry} --server.headless true", new Dictionary<string, string>(), true);
         }
 
         string mainFile = new[] { "main.py", "app.py", "run.py", "server.py" }.FirstOrDefault(f => File.Exists(P(f))) ?? "main.py";

@@ -78,6 +78,27 @@ public sealed class ProjectRuntime
     /// <summary>Raised after any state/property change.</summary>
     public event Action<ProjectRuntime>? Changed;
 
+    /// <summary>Raised when <see cref="ProjectDefinition.LastPort"/> was updated from what the run serves on (the manager saves it).</summary>
+    public event Action<ProjectRuntime>? LastPortChanged;
+
+    /// <summary>
+    /// The port the current run serves on: the one in the URL it printed if it listens there, else the pinned port,
+    /// else the lowest port it listens on. Null while nothing listens.
+    /// </summary>
+    public int? LivePort
+    {
+        get
+        {
+            IReadOnlyList<int> ports;
+            string? url;
+            int? pinned;
+            lock (_gate) { ports = ListeningPorts; url = DetectedUrl; pinned = RunPort; }
+            if (url is not null && UrlDetector.Find(url) is { IsLocal: true } u && ports.Contains(u.Port)) return u.Port;
+            if (pinned is int p && ports.Contains(p)) return p;
+            return ports.Count > 0 ? ports[0] : null;
+        }
+    }
+
     /// <summary>Raised when the start command crashes (not when the user stops it).</summary>
     public event Action<ProjectRuntime, int>? Crashed;
 
@@ -189,7 +210,9 @@ public sealed class ProjectRuntime
 
             session.UrlDetected += OnUrlDetected;
             _readinessCts = new CancellationTokenSource();
-            _ = MonitorAsync(session, _readinessCts.Token);
+            // A known dev server isn't "running" until it listens; anything else is once it has stayed up briefly.
+            bool expectServer = RunPort is not null || FrameworkDetector.ById(def.Framework).CanPinPort;
+            _ = MonitorAsync(session, expectServer, _readinessCts.Token);
             _ = WaitForExitAsync(session);
             RaiseChanged();
         }
@@ -392,7 +415,7 @@ public sealed class ProjectRuntime
     /// <summary>How long a run may stay "Starting" waiting for its port before it's treated as running anyway.</summary>
     public static TimeSpan PortWaitLimit { get; set; } = TimeSpan.FromSeconds(20);
 
-    private async Task MonitorAsync(ProcessSession session, CancellationToken ct)
+    private async Task MonitorAsync(ProcessSession session, bool expectServer, CancellationToken ct)
     {
         try
         {
@@ -408,6 +431,7 @@ public sealed class ProjectRuntime
                 if (portsChanged)
                 {
                     lock (_gate) if (ReferenceEquals(_session, session)) ListeningPorts = ports;
+                    RememberLivePort();
                 }
 
                 if (State == ProjectState.Starting)
@@ -415,7 +439,7 @@ public sealed class ProjectRuntime
                     var elapsed = DateTime.Now - started;
                     bool ready = RunPort is int p
                         ? ports.Contains(p) || await PortProbe.IsListeningAsync(p, ct).ConfigureAwait(false)
-                        : ports.Count > 0 || elapsed > TimeSpan.FromSeconds(2);
+                        : ports.Count > 0 || (!expectServer && elapsed > TimeSpan.FromSeconds(2));
                     if (ready)
                     {
                         MarkRunning(session);
@@ -425,7 +449,12 @@ public sealed class ProjectRuntime
                         // Alive but not listening: a watcher/worker, or a server that ignores the port. Don't spin forever.
                         Log.Error(ports.Count > 0
                             ? $"⚠ {PortWaitLimit.TotalSeconds:0}초가 지나도 포트 {waiting}이(가) 열리지 않았고, 대신 {string.Join(", ", ports)}에서 리슨 중입니다. 포트 전달 방식(설정)을 확인하세요."
-                            : $"⚠ {PortWaitLimit.TotalSeconds:0}초가 지나도 포트 {waiting}이(가) 열리지 않았습니다. 서버가 아니라면 설정에서 포트 배정을 끄세요.");
+                            : $"⚠ {PortWaitLimit.TotalSeconds:0}초가 지나도 포트 {waiting}이(가) 열리지 않았습니다. 서버가 아니라면 포트 고정을 푸세요.");
+                        MarkRunning(session);
+                    }
+                    else if (expectServer && elapsed > PortWaitLimit)
+                    {
+                        Log.System($"{PortWaitLimit.TotalSeconds:0}초가 지나도 리슨하는 포트가 없어 실행 중으로 표시합니다.");
                         MarkRunning(session);
                     }
                     else if (portsChanged)
@@ -461,8 +490,23 @@ public sealed class ProjectRuntime
         }
         if (RunPort is int p && url.IsLocal && url.Port != p)
             Log.Error($"⚠ 배정한 포트는 {p}인데 서버가 {url.Port}에서 열렸습니다. 포트 전달 방식(설정)을 확인하세요.");
+        if (changed) RememberLivePort();
         if (url.IsLocal && State == ProjectState.Starting) MarkRunning(session);
         else if (changed) RaiseChanged();
+    }
+
+    /// <summary>Copies <see cref="LivePort"/> into the definition so a stopped project can still show where it was.</summary>
+    private void RememberLivePort()
+    {
+        if (LivePort is not int live) return;
+        lock (_gate)
+        {
+            if (_session is null || Definition.LastPort == live) return;
+            var updated = Definition.Clone();
+            updated.LastPort = live;
+            Definition = updated;
+        }
+        LastPortChanged?.Invoke(this);
     }
 
     private static bool IsLocalUrl(string url) => UrlDetector.Find(url) is { IsLocal: true };

@@ -112,6 +112,7 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <Grid.ContextFlyout>
                                 <MenuFlyout>
@@ -151,8 +152,31 @@
                                 <TextBlock MaxLines="1" Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                                 <TextBlock MaxLines="1" Style="{StaticResource CaptionSecondaryStyle}" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
+                            <!-- Port: a filled badge while the process listens on it; otherwise the last-seen port as dim text with a pin (pinned) or history (unpinned) icon. -->
+                            <Grid Grid.Column="2" VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind PortBadgeTooltip, Mode=OneWay}">
+                                <Border
+                                    Padding="6,1,6,2"
+                                    AutomationProperties.AutomationId="PortBadgeLive"
+                                    Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
+                                    BorderBrush="{ThemeResource SystemFillColorSuccessBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Visibility="{x:Bind IsPortLive, Mode=OneWay}">
+                                    <TextBlock FontFamily="{StaticResource LogFontFamily}" FontSize="12" Foreground="{ThemeResource SystemFillColorSuccessBrush}" Text="{x:Bind PortBadge, Mode=OneWay}" />
+                                </Border>
+                                <StackPanel
+                                    Padding="6,1,6,2"
+                                    AutomationProperties.AutomationId="PortBadgeIdle"
+                                    Orientation="Horizontal"
+                                    Spacing="3"
+                                    Visibility="{x:Bind IsPortIdle, Mode=OneWay}">
+                                    <FontIcon VerticalAlignment="Center" FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE718;" Visibility="{x:Bind IsPortPinned, Mode=OneWay}" />
+                                    <FontIcon VerticalAlignment="Center" FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE81C;" Visibility="{x:Bind IsPortLastSeen, Mode=OneWay}" />
+                                    <TextBlock FontFamily="{StaticResource LogFontFamily}" FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{x:Bind PortBadge, Mode=OneWay}" />
+                                </StackPanel>
+                            </Grid>
                             <Button
-                                Grid.Column="2"
+                                Grid.Column="3"
                                 Padding="6"
                                 AutomationProperties.Name="{x:Bind local:Converters.ToggleTooltip(CanStop), Mode=OneWay}"
                                 Command="{x:Bind ToggleCommand}"
@@ -305,6 +329,59 @@
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" VerticalAlignment="Top" Orientation="Horizontal" Spacing="2">
+                        <!-- Port pinning: only for dev servers we know how to hand a port to (or one already pinned). -->
+                        <Button
+                            Margin="0,0,6,0"
+                            Padding="10,5"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="PinPortButton"
+                            AutomationProperties.Name="포트 고정"
+                            ToolTipService.ToolTip="{x:Bind local:Converters.PinTooltip(ViewModel.SelectedProject.HasPinnedPort), Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.SelectedProject.CanPinPort, Mode=OneWay}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon VerticalAlignment="Center" FontSize="13" Glyph="{x:Bind local:Converters.PinGlyph(ViewModel.SelectedProject.HasPinnedPort), Mode=OneWay}" />
+                                <TextBlock VerticalAlignment="Center" FontFamily="{x:Bind local:Converters.PinFont(ViewModel.SelectedProject.HasPinnedPort), Mode=OneWay}" FontSize="12.5" Text="{x:Bind ViewModel.SelectedProject.PinButtonText, Mode=OneWay}" />
+                            </StackPanel>
+                            <Button.Flyout>
+                                <Flyout x:Name="PinPortFlyout" Opening="PinPortFlyout_Opening" Placement="BottomEdgeAlignedRight">
+                                    <StackPanel Width="290" Spacing="10">
+                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="포트 고정" />
+                                        <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="시작할 때마다 이 포트를 서버에 넘깁니다. 고정하지 않으면 서버가 정한 포트를 그대로 쓰고, 열린 포트만 보여 줍니다." TextWrapping="Wrap" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <NumberBox
+                                                x:Name="PinPortBox"
+                                                AutomationProperties.AutomationId="PinPortBox"
+                                                AutomationProperties.Name="고정할 포트"
+                                                Maximum="65535"
+                                                Minimum="1"
+                                                SpinButtonPlacementMode="Compact"
+                                                ValueChanged="PinPortBox_ValueChanged" />
+                                            <Button Grid.Column="1" Click="PinFindFree_Click" Content="빈 포트" ToolTipService.ToolTip="앱의 포트 범위에서 비어 있는 포트를 찾습니다" />
+                                        </Grid>
+                                        <TextBlock x:Name="PinPortStatus" Style="{StaticResource CaptionSecondaryStyle}" TextWrapping="Wrap" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button x:Name="UnpinButton" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="UnpinButton" Click="Unpin_Click" Content="고정 해제" />
+                                            <Button
+                                                x:Name="PinApplyButton"
+                                                Grid.Column="1"
+                                                HorizontalAlignment="Stretch"
+                                                AutomationProperties.AutomationId="PinApplyButton"
+                                                Click="PinApply_Click"
+                                                Content="고정"
+                                                Style="{StaticResource AccentButtonStyle}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
                         <Button
                             AutomationProperties.AutomationId="OpenBrowserButton"
                             AutomationProperties.Name="브라우저로 열기"
@@ -349,9 +426,6 @@
                             <Button.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedRight">
                                     <ToggleMenuFlyoutItem Command="{x:Bind ViewModel.SelectedProject.ToggleAutoRestartCommand, Mode=OneWay}" IsChecked="{x:Bind ViewModel.SelectedProject.AutoRestart, Mode=OneWay}" Text="크래시 시 자동 재시작" />
-                                    <MenuFlyoutItem Click="ReassignPort_Click" Text="다른 포트 배정">
-                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE968;" /></MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
                                     <MenuFlyoutItem Command="{x:Bind ViewModel.SelectedProject.AddCustomCommandCommand, Mode=OneWay}" Text="명령 추가…">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
@@ -408,10 +482,6 @@
                             ToolTipService.ToolTip="실행 시간" />
                     </StackPanel>
                     <controls:WrapPanel Grid.Column="1" VerticalAlignment="Center" Spacing="16">
-                        <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasPort, Mode=OneWay}">
-                            <TextBlock Style="{StaticResource CaptionSecondaryStyle}" Text="포트" />
-                            <TextBlock AutomationProperties.AutomationId="ProjectPort" FontFamily="{StaticResource LogFontFamily}" Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.SelectedProject.PortText, Mode=OneWay}" />
-                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="6" Visibility="{x:Bind ViewModel.SelectedProject.HasUrl, Mode=OneWay}">
                             <TextBlock VerticalAlignment="Center" Style="{StaticResource CaptionSecondaryStyle}" Text="주소" />
                             <HyperlinkButton Padding="0" AutomationProperties.AutomationId="ProjectUrl" Command="{x:Bind ViewModel.SelectedProject.OpenBrowserCommand, Mode=OneWay}">

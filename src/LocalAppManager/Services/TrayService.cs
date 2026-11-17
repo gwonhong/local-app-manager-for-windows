@@ -73,7 +73,7 @@ public sealed class TrayService : IDisposable
         {
             var project = p;
             var runtime = project.Runtime;
-            string port = runtime.Definition.Port is int pt && project.PortText.Length > 0 ? $"  :{pt}" : "";
+            string port = project.PortBadge.Length > 0 ? "  " + project.PortBadge : "";
             items.Add(new ToggleMenuFlyoutItem
             {
                 Text = project.Name + port,

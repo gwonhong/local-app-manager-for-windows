@@ -34,6 +34,15 @@ public static class Converters
     public static string ChipGlyph(bool running, bool succeeded, bool failed) =>
         running ? "" : failed ? "" : succeeded ? "" : "";
 
+    /// <summary>Pin button: filled pin when a port is pinned, outline otherwise.</summary>
+    public static string PinGlyph(bool pinned) => pinned ? "" : "";
+
+    public static string PinTooltip(bool pinned) => pinned ? "고정된 포트 — 바꾸거나 해제" : "포트 고정";
+
+    /// <summary>Monospace for the ":4100" label; the UI font for the Korean "포트 고정" (monospace renders it poorly).</summary>
+    public static FontFamily PinFont(bool pinned) =>
+        (FontFamily)Application.Current.Resources[pinned ? "LogFontFamily" : "ContentControlThemeFontFamily"];
+
     /// <summary>The window's effective theme (it can differ from the app theme when the user forces light/dark).</summary>
     public static ElementTheme Theme { get; set; } = ElementTheme.Dark;
 

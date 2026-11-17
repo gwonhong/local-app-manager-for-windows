@@ -33,8 +33,14 @@ public sealed class ProjectDefinition
     /// <summary>Shell command run through cmd.exe. May contain <c>{port}</c>.</summary>
     public string StartCommand { get; set; } = "";
 
-    /// <summary>Fixed port assigned from the app's range. Null when the project doesn't use one.</summary>
+    /// <summary>
+    /// Pinned port, passed to the server on every start (see <see cref="PortMode"/>). Null (the default) means the
+    /// app passes nothing and only observes which ports the process tree listens on.
+    /// </summary>
     public int? Port { get; set; }
+
+    /// <summary>The port this project was last seen serving on, kept so a stopped project can still show it.</summary>
+    public int? LastPort { get; set; }
 
     public PortMode PortMode { get; set; } = PortMode.Env;
 
