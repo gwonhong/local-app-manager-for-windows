@@ -1,0 +1,94 @@
+# Builds and publishes a GitHub Release when a version tag is pushed.
+#
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# The tag is the single source of truth for the version: "v0.2.0" builds the
+# app as 0.2.0, "v0.3.0-beta.1" as 0.3.0-beta.1 and marks the release as a
+# pre-release. Ordinary pushes to branches do not trigger anything.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - platform: x64
+            rid: win-x64
+          - platform: ARM64
+            rid: win-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        if: matrix.platform == 'x64'
+        run: dotnet test tests/LocalAppManager.Core.Tests/LocalAppManager.Core.Tests.csproj -c Release
+
+      - name: Publish
+        run: >
+          dotnet publish src/LocalAppManager/LocalAppManager.csproj
+          -c Release
+          -p:Platform=${{ matrix.platform }}
+          -p:PublishProfile=${{ matrix.rid }}
+          -p:Version=${{ steps.version.outputs.version }}
+          -o out/LocalAppManager
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $zip = "LocalAppManager-${{ steps.version.outputs.version }}-${{ matrix.rid }}.zip"
+          Compress-Archive -Path out/LocalAppManager -DestinationPath $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: ${{ env.ZIP }}
+          if-no-files-found: error
+
+  release:
+    name: Create release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            $prerelease

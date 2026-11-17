@@ -4,6 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Local builds only. Release builds take the version from the git tag (.github/workflows/release.yml). -->
     <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>
