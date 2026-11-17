@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using LocalAppManager.Core.Logs;
 using LocalAppManager.Core.Processes;
@@ -14,6 +15,26 @@ public class ProcessTreeTests
     private static string? FindOnPath(string exe) =>
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(d => Path.Combine(d.Trim(), exe)).FirstOrDefault(File.Exists);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
+
+    /// <summary>
+    /// Non-ASCII text that cmd can write in this machine's OEM code page. cmd turns characters the
+    /// code page lacks into '?' before we ever see them, so Korean only works on a CP949 machine
+    /// (CI runners are en-US, CP437).
+    /// </summary>
+    private static string OemSample(string preferred)
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var oem = Encoding.GetEncoding((int)GetOEMCP(), EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+        foreach (var candidate in new[] { preferred, "café", "naïve" })
+        {
+            try { if (oem.GetString(oem.GetBytes(candidate)) == candidate) return candidate; }
+            catch (EncoderFallbackException) { }
+        }
+        throw new InvalidOperationException($"No sample text fits OEM code page {oem.CodePage}");
+    }
 
     // Parent prints its pid, spawns a child (which prints its pid) and both idle forever.
     private const string TreeScript =
@@ -131,9 +152,10 @@ public class ProcessTreeTests
     [Fact]
     public async Task Exit_code_and_output_are_captured()
     {
+        var sample = OemSample("오류");
         var proc = ChildProcess.Start(new ChildProcessOptions
         {
-            CommandLine = CommandBuilder.WrapInCmd("echo hello& echo 오류>&2& exit /b 7"),
+            CommandLine = CommandBuilder.WrapInCmd($"echo hello& echo {sample}>&2& exit /b 7"),
             WorkingDirectory = Path.GetTempPath(),
             Environment = EnvironmentBuilder.CreateBase(),
         });
@@ -147,7 +169,7 @@ public class ProcessTreeTests
             decoder.Feed(ms.ToArray(), lines);
             decoder.Flush(lines);
             Assert.Contains("hello", lines);
-            Assert.Contains("오류", lines); // cmd writes CP949 here; the decoder falls back to the OEM code page
+            Assert.Contains(sample, lines); // cmd writes the OEM code page here; the decoder falls back to it
         }
     }
 
@@ -155,7 +177,8 @@ public class ProcessTreeTests
     public void Environment_block_is_passed()
     {
         var env = EnvironmentBuilder.CreateBase();
-        env["LAM_TEST_VAR"] = "값 123";
+        var sample = OemSample("값") + " 123";
+        env["LAM_TEST_VAR"] = sample;
         var proc = ChildProcess.Start(new ChildProcessOptions
         {
             CommandLine = CommandBuilder.WrapInCmd("echo %LAM_TEST_VAR%"),
@@ -170,7 +193,7 @@ public class ProcessTreeTests
             var lines = new List<string>();
             decoder.Feed(ms.ToArray(), lines);
             decoder.Flush(lines);
-            Assert.Equal("값 123", lines.FirstOrDefault()?.Trim());
+            Assert.Equal(sample, lines.FirstOrDefault()?.Trim());
         }
     }
 }
