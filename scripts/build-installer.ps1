@@ -6,7 +6,7 @@
   The same steps the release workflow runs (.github/workflows/release.yml), so anyone can build
   the installer from source and compare it with the one on GitHub Releases.
 
-    ./scripts/build-installer.ps1                       # this machine's architecture, version from Directory.Build.props
+    ./scripts/build-installer.ps1                       # this machine's architecture, version from the git tag
     ./scripts/build-installer.ps1 -Platform ARM64 -Version 0.3.0
 
   Output (artifacts/ is git-ignored):
@@ -38,7 +38,22 @@ Push-Location $root
 try {
     $rid = "win-$($Platform.ToLowerInvariant())"
     if (-not $Version) {
-        $Version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        # Follow the git tags like the release workflow does. On a tagged commit that is the tag's
+        # version (v0.2.1 → 0.2.1). N commits past it, a pre-release that sorts above the last tag
+        # and below the next release: 0.2.2-dev.N, or 0.3.0-beta.1.dev.N past v0.3.0-beta.1.
+        $described = git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --long 2>$null
+        if ($LASTEXITCODE -eq 0 -and $described -match '^v(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?-(\d+)-g[0-9a-f]+$') {
+            $commits = [int]$Matches[5]
+            if ($commits -eq 0) {
+                $Version = "$($Matches[1]).$($Matches[2]).$($Matches[3])$($Matches[4])"
+            } elseif ($Matches[4]) {
+                $Version = "$($Matches[1]).$($Matches[2]).$($Matches[3])$($Matches[4]).dev.$commits"
+            } else {
+                $Version = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)-dev.$commits"
+            }
+        } else {
+            $Version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        }
     }
     if (-not $OutputDir) { $OutputDir = "artifacts/installer/$rid" }
     $publishDir = "artifacts/publish/$rid"
