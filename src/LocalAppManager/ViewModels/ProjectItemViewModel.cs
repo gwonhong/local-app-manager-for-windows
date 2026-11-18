@@ -240,6 +240,18 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     public static event Action<ProjectItemViewModel>? RemoveRequested;
     public static event Action<ProjectItemViewModel>? ManageCommandsRequested;
 
+    /// <summary>
+    /// Asks the user before interrupting a running command (title, message); true to go ahead.
+    /// Set by the view, which owns the XamlRoot for the dialog.
+    /// </summary>
+    public static Func<string, string, Task<bool>>? ConfirmInterrupt { get; set; }
+
+    /// <summary>True when nothing runs, or the user agreed to stop what does.</summary>
+    private async Task<bool> ConfirmInterruptAsync(string title, string message) =>
+        !Runtime.IsActive || ConfirmInterrupt is null || await ConfirmInterrupt(title, message);
+
+    private string RunningName => Runtime.RunName is { Length: > 0 } n ? n : "명령";
+
     [RelayCommand]
     private void Edit() => EditRequested?.Invoke(this);
 
@@ -259,7 +271,12 @@ public sealed partial class ProjectItemViewModel : ObservableObject
 
     /// <summary>Runs the current (or last) command again.</summary>
     [RelayCommand]
-    private Task RestartAsync() => _manager.RestartAsync(Id);
+    private async Task RestartAsync()
+    {
+        if (!await ConfirmInterruptAsync($"{RunningName}을(를) 재시작할까요?",
+                $"{Name}에서 {RunningName}이(가) 실행 중입니다. 정지하고 다시 실행합니다.")) return;
+        await _manager.RestartAsync(Id);
+    }
 
     /// <summary>The list's ▶/■: stops what runs, or runs the first chip.</summary>
     [RelayCommand]
@@ -293,7 +310,16 @@ public sealed partial class ProjectItemViewModel : ObservableObject
     /// to it and pressing the running chip restarts it.
     /// </summary>
     [RelayCommand(AllowConcurrentExecutions = true)]
-    private Task RunChipAsync(CommandChipViewModel chip) => _manager.RunAsync(Id, chip.Key);
+    private async Task RunChipAsync(CommandChipViewModel chip)
+    {
+        bool same = Runtime.RunKey == chip.Key;
+        string title = same ? $"{chip.Label}을(를) 재시작할까요?" : $"{RunningName}을(를) 정지하고 {chip.Label}을(를) 실행할까요?";
+        string message = same
+            ? $"{Name}에서 {chip.Label}이(가) 실행 중입니다. 정지하고 다시 실행합니다."
+            : $"{Name}에서 {RunningName}이(가) 실행 중입니다. 한 번에 하나만 실행되므로 {RunningName}은(는) 정지됩니다.";
+        if (!await ConfirmInterruptAsync(title, message)) return;
+        await _manager.RunAsync(Id, chip.Key);
+    }
 
     /// <summary>Takes a chip off the row (a script can be put back from the command panel).</summary>
     [RelayCommand]

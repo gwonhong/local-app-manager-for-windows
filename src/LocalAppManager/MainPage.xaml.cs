@@ -47,6 +47,7 @@ public sealed partial class MainPage : Page
         ProjectItemViewModel.EditRequested += p => Ui.Forget(EditProjectAsync(p), "edit project");
         ProjectItemViewModel.ManageCommandsRequested += p => Ui.Forget(ManageCommandsAsync(p), "manage commands");
         ProjectItemViewModel.RemoveRequested += p => Ui.Forget(RemoveProjectAsync(p), "remove project");
+        ProjectItemViewModel.ConfirmInterrupt = ConfirmInterruptAsync;
         GroupViewModel.EditRequested += g => Ui.Forget(EditGroupAsync(g), "edit group");
         GroupViewModel.RemoveRequested += g => vm.Manager.RemoveGroup(g.Id);
 
@@ -219,6 +220,31 @@ public sealed partial class MainPage : Page
             _dialogOpen = false;
         }
         await ViewModel.RemoveProjectAsync(project);
+    }
+
+    /// <summary>Warns before a restart or another command stops the one that runs.</summary>
+    private async Task<bool> ConfirmInterruptAsync(string title, string message)
+    {
+        if (_dialogOpen) return false;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = ActualTheme,
+            Title = title,
+            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = "계속",
+            CloseButtonText = "취소",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        _dialogOpen = true;
+        try
+        {
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
     }
 
     // ------------------------------------------------------------------ port pinning (header pin button)
